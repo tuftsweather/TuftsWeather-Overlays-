@@ -185,7 +185,9 @@ function normalizeServiceConfig(payload: Partial<ServiceConfig> | null): Service
 }
 
 function getEmbedPreviewUrl(url: string) {
-  const value = String(url || '').trim()
+  const rawValue = String(url || '').trim()
+  const srcMatch = rawValue.match(/\bsrc=(["'])(.*?)\1/i)
+  const value = srcMatch?.[2]?.trim() || rawValue
   if (!value) {
     return ''
   }
@@ -971,6 +973,7 @@ function App() {
                     updateNwwsConfig({ reconnectIntervalSeconds: event.target.value })
                   }
                 />
+                <span className="field-help">Seconds to wait before reconnecting if NWWS drops.</span>
               </label>
               <label>
                 Backfill Sec
@@ -981,6 +984,7 @@ function App() {
                     updateNwwsConfig({ backfillIntervalSeconds: event.target.value })
                   }
                 />
+                <span className="field-help">Seconds between catch-up checks for missed alerts.</span>
               </label>
             </div>
           </article>
@@ -1014,6 +1018,7 @@ function App() {
                     updateNwsApiConfig({ pollIntervalSeconds: event.target.value })
                   }
                 />
+                <span className="field-help">How often the NWS API fallback checks for alerts.</span>
               </label>
             </div>
           </article>
@@ -1069,7 +1074,7 @@ function App() {
             </div>
           ) : (
             customCameras.items.map((camera, index) => (
-              <article key={`${index}-${camera.name}`} className="camera-row">
+              <article key={index} className="camera-row">
                 <div className="camera-row__header">
                   <label className="toggle-line">
                     <input
