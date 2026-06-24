@@ -176,7 +176,7 @@
 
       const settings = {
         refreshTime: Math.max(5, Number(params.get("setRefreshTime") || "15")),
-        rotationTime: Math.max(5, Number(params.get("setRotationTime") || "20")),
+        rotationTime: Math.max(20, Number(params.get("setRotationTime") || "20")),
         matchesUrl: params.get("setMatchesUrl") || "/api/warned-cameras?widget=winter",
         cameraDataUrl: params.get("setCameraDataUrl") || "/api/cameras-lite?widget=winter",
         fallbackCameraDataUrl: params.get("setFallbackCameraDataUrl") || "/api/cameras?v=21",
@@ -201,6 +201,9 @@
         cameras: [],
         matches: [],
         currentIndex: -1,
+        currentChaserIndex: -1,
+        rotationStep: 0,
+        chasers: [],
         currentStreamUrl: "",
         currentEventsSignature: "",
         failedStreamUrls: new Set(),
@@ -608,6 +611,9 @@
         });
 
         const filteredStreams = state.cameras.filter((stream) => {
+          if (stream.properties?.is_custom) {
+            return false;
+          }
           if (settings.streamSource !== "*" && String(stream.properties.source || "").toLowerCase() !== settings.streamSource) {
             return false;
           }
@@ -673,6 +679,21 @@
         return uniqueMatches;
       }
 
+      function getCustomChaserMatches(contextEvent) {
+        return state.cameras
+          .filter((stream) => {
+            const properties = stream?.properties || {};
+            if (!properties.is_custom) return false;
+            if (!properties.stream_url) return false;
+            if (settings.streamSource !== "*" && String(properties.source || "").toLowerCase() !== settings.streamSource) return false;
+            if (settings.search) {
+              const haystack = `${properties.name || ""} ${properties.location || ""} ${properties.source || ""}`.toLowerCase();
+              if (!haystack.includes(settings.search.toLowerCase())) return false;
+            }
+            return true;
+          })
+          .map((stream) => ({ stream, event: contextEvent || null, isChaserCutaway: true }));
+      }
       async function loadStream(match) {
         const url = match?.stream?.properties?.stream_url;
         if (!url) {
@@ -749,6 +770,22 @@
       }
 
       function rotateToNext(skipFailed = false) {
+        const shouldShowChaser = state.chasers.length && (state.rotationStep % 4 === 3 || !state.matches.length);
+        state.rotationStep += 1;
+
+        if (shouldShowChaser) {
+          const totalChasers = state.chasers.length;
+          for (let offset = 1; offset <= totalChasers; offset += 1) {
+            const nextIndex = (state.currentChaserIndex + offset + totalChasers) % totalChasers;
+            const nextMatch = state.chasers[nextIndex];
+            const nextUrl = nextMatch?.stream?.properties?.stream_url;
+            if (skipFailed && nextUrl && state.failedStreamUrls.has(nextUrl)) continue;
+            state.currentChaserIndex = nextIndex;
+            loadStream(nextMatch);
+            return;
+          }
+        }
+
         if (!state.matches.length) {
           state.currentIndex = -1;
           updateOverlay(null, "No winter warning cameras available right now");
@@ -760,9 +797,7 @@
           const nextIndex = (state.currentIndex + offset + total) % total;
           const nextMatch = state.matches[nextIndex];
           const nextUrl = nextMatch?.stream?.properties?.stream_url;
-          if (skipFailed && nextUrl && state.failedStreamUrls.has(nextUrl)) {
-            continue;
-          }
+          if (skipFailed && nextUrl && state.failedStreamUrls.has(nextUrl)) continue;
           state.currentIndex = nextIndex;
           loadStream(nextMatch);
           return;
@@ -786,26 +821,35 @@
             console.warn("[WarnedCams] Server match endpoint failed, using local fallback", serverMatchError);
           }
 
-          const nextSignature = matches
-            .map((match) => `${match?.stream?.properties?.cameraId || match?.stream?.properties?.stream_url || ""}|${match?.event?.properties?.details?.tracking || match?.event?.id || ""}|${match?.event?.properties?.issued || ""}|${match?.event?.properties?.expires || ""}`)
-            .join("||");
-          if (nextSignature === state.currentEventsSignature && state.matches.length) {
+          let contextEvent = matches[0]?.event || null;
+          if (!contextEvent) {
+            const events = await fetchEvents();
+            contextEvent = events[0] || null;
+          }
+          const chasers = contextEvent ? getCustomChaserMatches(contextEvent) : [];
+          const nextSignature = [
+            ...matches.map((match) => `${match?.stream?.properties?.cameraId || match?.stream?.properties?.stream_url || ""}|${match?.event?.properties?.details?.tracking || match?.event?.id || ""}|${match?.event?.properties?.issued || ""}|${match?.event?.properties?.expires || ""}`),
+            ...chasers.map((match) => `chaser|${match?.stream?.properties?.cameraId || match?.stream?.properties?.stream_url || ""}`),
+          ].join("||");
+          if (nextSignature === state.currentEventsSignature && (state.matches.length || state.chasers.length)) {
             return;
           }
 
           state.currentEventsSignature = nextSignature;
-          const previousUrl = state.matches[state.currentIndex]?.stream?.properties?.stream_url || "";
+          const previousUrl = state.matches[state.currentIndex]?.stream?.properties?.stream_url || state.chasers[state.currentChaserIndex]?.stream?.properties?.stream_url || "";
           state.matches = matches;
+          state.chasers = chasers;
 
-          const activeUrls = new Set(state.matches.map((match) => match?.stream?.properties?.stream_url).filter(Boolean));
+          const activeUrls = new Set([...state.matches, ...state.chasers].map((match) => match?.stream?.properties?.stream_url).filter(Boolean));
           state.failedStreamUrls.forEach((url) => {
             if (!activeUrls.has(url)) {
               state.failedStreamUrls.delete(url);
             }
           });
 
-          if (!state.matches.length) {
+          if (!state.matches.length && !state.chasers.length) {
             state.currentIndex = -1;
+            state.currentChaserIndex = -1;
             updateOverlay(null, "No winter warning cameras available right now");
             return;
           }
@@ -827,7 +871,7 @@
           clearInterval(state.rotationTimer);
         }
         state.rotationTimer = setInterval(() => {
-          if (state.matches.length) {
+          if (state.matches.length || state.chasers.length) {
             rotateToNext(true);
           }
         }, settings.rotationTime * 1000);
@@ -840,3 +884,6 @@
   </script>
 </body>
 </html>
+
+
+

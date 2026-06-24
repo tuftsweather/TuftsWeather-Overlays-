@@ -80,11 +80,11 @@ The easiest way is the dashboard:
 http://127.0.0.1:4318/
 ```
 
-Open `Configuration > Custom Cameras`, add a camera, paste the YouTube livestream URL, enter latitude/longitude, choose Severe/Winter/Tropical, then save.
+Open `Configuration > Custom Cameras`, add a camera, paste the YouTube livestream URL, choose Severe/Winter/Tropical, then save. Latitude/longitude is optional for chaser cutaways.
 
 You can also edit `config/localoverlays.local.json` directly.
 
-Each custom camera needs a name, a URL, and a latitude/longitude so the warned camera widgets know whether it is inside a warning area. You can add as many entries as you want.
+Each custom camera needs a name and URL. If latitude/longitude is blank, it rotates in as a chaser cutaway every few cameras instead of being matched to an exact warning polygon. You can add as many entries as you want.
 
 ```json
 {
@@ -113,6 +113,12 @@ Each custom camera needs a name, a URL, and a latitude/longitude so the warned c
 You can also paste a normal YouTube watch URL like `https://www.youtube.com/watch?v=VIDEO_ID`; the server will convert it to an embed URL automatically.
 
 Restart TuftsWeather Overlays after changing the config.
+
+## Change Feed Settings
+
+The dashboard also has `Configuration > Feeds` for NWWS and NWS API settings. You can set NWWS username/password/nickname, toggle NWWS, toggle the NWS API fallback, and change polling intervals.
+
+After saving feed settings, restart TuftsWeather Overlays so the parser reconnects with the new settings.
 
 ## Start
 

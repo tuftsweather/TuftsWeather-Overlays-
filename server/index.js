@@ -33,6 +33,7 @@ const defaultConfig = {
     backfillIntervalSeconds: 60,
   },
   nwsApi: {
+    enabled: true,
     endpoint: 'https://api.weather.gov/alerts/active',
     pollIntervalSeconds: 30,
   },
@@ -154,6 +155,28 @@ function sanitizeCustomCameraConfig(input) {
         };
       })
       .filter((item) => item.name || item.url || Number.isFinite(item.latitude) || Number.isFinite(item.longitude)),
+  };
+}
+
+function sanitizeServiceConfig(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const nwws = source.nwws && typeof source.nwws === 'object' ? source.nwws : {};
+  const nwsApi = source.nwsApi && typeof source.nwsApi === 'object' ? source.nwsApi : {};
+
+  return {
+    nwws: {
+      enabled: Boolean(nwws.enabled),
+      username: String(nwws.username || '').trim(),
+      password: String(nwws.password || ''),
+      nickname: String(nwws.nickname || 'TuftsWeather Overlays').trim() || 'TuftsWeather Overlays',
+      reconnectIntervalSeconds: Math.max(15, Number(nwws.reconnectIntervalSeconds || 60)),
+      backfillIntervalSeconds: Math.max(15, Number(nwws.backfillIntervalSeconds || 60)),
+    },
+    nwsApi: {
+      enabled: nwsApi.enabled !== false,
+      endpoint: String(nwsApi.endpoint || 'https://api.weather.gov/alerts/active').trim() || 'https://api.weather.gov/alerts/active',
+      pollIntervalSeconds: Math.max(15, Number(nwsApi.pollIntervalSeconds || 30)),
+    },
   };
 }
 
@@ -319,10 +342,11 @@ function getCustomCameraFeatures(widget = 'severe') {
       continue;
     }
 
-    const lat = Number(item.latitude ?? item.lat);
-    const lon = Number(item.longitude ?? item.lon ?? item.lng);
+    const lat = toFiniteConfigNumber(item.latitude ?? item.lat);
+    const lon = toFiniteConfigNumber(item.longitude ?? item.lon ?? item.lng);
+    const hasLocation = lat !== null && lon !== null;
     const streamUrl = normalizeCustomCameraUrl(item.embedUrl || item.streamUrl || item.url);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !streamUrl) {
+    if (!streamUrl) {
       continue;
     }
 
@@ -330,7 +354,7 @@ function getCustomCameraFeatures(widget = 'severe') {
       type: 'Feature',
       geometry: {
         type: 'Point',
-        coordinates: [lon, lat],
+        coordinates: hasLocation ? [lon, lat] : [0, 0],
       },
       properties: {
         cameraId: `custom-${index}-${streamUrl}`,
@@ -341,6 +365,7 @@ function getCustomCameraFeatures(widget = 'severe') {
         stream_url: streamUrl,
         embed_url: streamUrl,
         is_custom: true,
+        has_location: hasLocation,
         widgets: {
           severe: widgets.severe !== false,
           winter: widgets.winter !== false,
@@ -352,15 +377,15 @@ function getCustomCameraFeatures(widget = 'severe') {
   return features;
 }
 
-function getCameraLitePayload(widget = 'severe') {
+function getCameraLitePayload(widget = 'severe', { includeCustom = true } = {}) {
   if (!fs.existsSync(warnedCamerasPath)) {
-    return makeFeatureCollection(getCustomCameraFeatures(widget));
+    return makeFeatureCollection(includeCustom ? getCustomCameraFeatures(widget) : []);
   }
 
   const stats = fs.statSync(warnedCamerasPath);
   const mtimeMs = stats.mtimeMs || 0;
   if (cameraLiteCache && cameraLiteCacheMtime === mtimeMs) {
-    const customFeatures = getCustomCameraFeatures(widget);
+    const customFeatures = includeCustom ? getCustomCameraFeatures(widget) : [];
     return makeFeatureCollection([
       ...cameraLiteCache.features,
       ...customFeatures,
@@ -418,7 +443,7 @@ function getCameraLitePayload(widget = 'severe') {
   cameraLiteCacheMtime = mtimeMs;
   return makeFeatureCollection([
     ...features,
-    ...getCustomCameraFeatures(widget),
+    ...(includeCustom ? getCustomCameraFeatures(widget) : []),
   ]);
 }
 
@@ -526,7 +551,7 @@ function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', 
     return [];
   }
 
-  const cameras = getCameraLitePayload(widget).features || [];
+  const cameras = getCameraLitePayload(widget, { includeCustom: false }).features || [];
   const matches = [];
   const seen = new Set();
 
@@ -922,7 +947,8 @@ function createParserSettings(config) {
       },
     },
     national_weather_service_settings: {
-      interval: config.nwsApi.pollIntervalSeconds,
+      enabled: config.nwsApi.enabled !== false,
+      interval: config.nwsApi.enabled === false ? 86400 : config.nwsApi.pollIntervalSeconds,
       endpoint: config.nwsApi.endpoint,
     },
     global_settings: {
@@ -2391,6 +2417,30 @@ app.get('/api/status', (_request, response) => {
 app.get('/api/config/custom-cameras', (_request, response) => {
   response.setHeader('Cache-Control', 'no-store');
   response.json(sanitizeCustomCameraConfig(runtimeConfig.customCameras));
+});
+
+app.get('/api/config/service', (_request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  response.json(sanitizeServiceConfig(runtimeConfig));
+});
+
+app.post('/api/config/service', express.json({ limit: '80kb' }), (request, response) => {
+  try {
+    const nextServiceConfig = sanitizeServiceConfig(request.body);
+    const diskConfig = readConfigFile();
+    diskConfig.nwws = nextServiceConfig.nwws;
+    diskConfig.nwsApi = nextServiceConfig.nwsApi;
+    writeConfigFile(diskConfig);
+    runtimeConfig.nwws = nextServiceConfig.nwws;
+    runtimeConfig.nwsApi = nextServiceConfig.nwsApi;
+    state.nickname = nextServiceConfig.nwws.nickname;
+    response.setHeader('Cache-Control', 'no-store');
+    response.json(nextServiceConfig);
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 app.post('/api/config/custom-cameras', express.json({ limit: '160kb' }), (request, response) => {

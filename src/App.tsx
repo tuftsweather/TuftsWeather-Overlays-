@@ -39,6 +39,22 @@ type CustomCameraConfig = {
   items: CustomCameraItem[]
 }
 
+type ServiceConfig = {
+  nwws: {
+    enabled: boolean
+    username: string
+    password: string
+    nickname: string
+    reconnectIntervalSeconds: string
+    backfillIntervalSeconds: string
+  }
+  nwsApi: {
+    enabled: boolean
+    endpoint: string
+    pollIntervalSeconds: string
+  }
+}
+
 const testAlerts = [
   { key: 'tornado-emergency', label: 'Tornado Emergency' },
   { key: 'pds-tornado', label: 'PDS Tornado' },
@@ -130,8 +146,14 @@ function normalizeCustomCameraConfig(payload: Partial<CustomCameraConfig> | null
           enabled: item.enabled !== false,
           name: String(item.name ?? ''),
           location: String(item.location ?? ''),
-          latitude: Number.isFinite(Number(item.latitude)) ? String(item.latitude) : '',
-          longitude: Number.isFinite(Number(item.longitude)) ? String(item.longitude) : '',
+          latitude:
+            item.latitude === null || item.latitude === undefined || String(item.latitude).trim() === ''
+              ? ''
+              : String(item.latitude),
+          longitude:
+            item.longitude === null || item.longitude === undefined || String(item.longitude).trim() === ''
+              ? ''
+              : String(item.longitude),
           url: String(item.url ?? ''),
           source: String(item.source || 'custom-chaser'),
           widgets: {
@@ -141,6 +163,24 @@ function normalizeCustomCameraConfig(payload: Partial<CustomCameraConfig> | null
           },
         }))
       : [],
+  }
+}
+
+function normalizeServiceConfig(payload: Partial<ServiceConfig> | null): ServiceConfig {
+  return {
+    nwws: {
+      enabled: Boolean(payload?.nwws?.enabled),
+      username: String(payload?.nwws?.username ?? ''),
+      password: String(payload?.nwws?.password ?? ''),
+      nickname: String(payload?.nwws?.nickname || 'TuftsWeather Overlays'),
+      reconnectIntervalSeconds: String(payload?.nwws?.reconnectIntervalSeconds ?? '60'),
+      backfillIntervalSeconds: String(payload?.nwws?.backfillIntervalSeconds ?? '60'),
+    },
+    nwsApi: {
+      enabled: payload?.nwsApi?.enabled !== false,
+      endpoint: String(payload?.nwsApi?.endpoint || 'https://api.weather.gov/alerts/active'),
+      pollIntervalSeconds: String(payload?.nwsApi?.pollIntervalSeconds ?? '30'),
+    },
   }
 }
 
@@ -155,6 +195,11 @@ function App() {
   })
   const [cameraConfigBusy, setCameraConfigBusy] = useState(false)
   const [cameraConfigMessage, setCameraConfigMessage] = useState('')
+  const [serviceConfig, setServiceConfig] = useState<ServiceConfig>(() =>
+    normalizeServiceConfig(null),
+  )
+  const [serviceConfigBusy, setServiceConfigBusy] = useState(false)
+  const [serviceConfigMessage, setServiceConfigMessage] = useState('')
 
   useEffect(() => {
     let active = true
@@ -226,6 +271,36 @@ function App() {
     return () => {
       active = false
       window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const loadServiceConfig = async () => {
+      const baseUrl =
+        window.location.port === '4173' ? 'http://127.0.0.1:4318' : ''
+
+      try {
+        const response = await fetch(`${baseUrl}/api/config/service`)
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        const payload = await response.json()
+        if (active) {
+          setServiceConfig(normalizeServiceConfig(payload))
+        }
+      } catch {
+        if (active) {
+          setServiceConfigMessage('Service config could not load')
+        }
+      }
+    }
+
+    void loadServiceConfig()
+
+    return () => {
+      active = false
     }
   }, [])
 
@@ -564,6 +639,48 @@ function App() {
     }
   }
 
+  function updateNwwsConfig(patch: Partial<ServiceConfig['nwws']>) {
+    setServiceConfig((current) => ({
+      ...current,
+      nwws: { ...current.nwws, ...patch },
+    }))
+  }
+
+  function updateNwsApiConfig(patch: Partial<ServiceConfig['nwsApi']>) {
+    setServiceConfig((current) => ({
+      ...current,
+      nwsApi: { ...current.nwsApi, ...patch },
+    }))
+  }
+
+  async function saveServiceConfig() {
+    const baseUrl =
+      window.location.port === '4173' ? 'http://127.0.0.1:4318' : ''
+
+    setServiceConfigBusy(true)
+    setServiceConfigMessage('')
+    try {
+      const response = await fetch(`${baseUrl}/api/config/service`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(serviceConfig),
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const payload = await response.json()
+      setServiceConfig(normalizeServiceConfig(payload))
+      setServiceConfigMessage('Saved. Restart TuftsWeather Overlays to reconnect with these feed settings.')
+      await refreshStatus()
+    } catch {
+      setServiceConfigMessage('Save failed')
+    } finally {
+      setServiceConfigBusy(false)
+    }
+  }
+
   return (
     <main className="dashboard-shell">
       <section className="dashboard-hero">
@@ -774,6 +891,120 @@ function App() {
         <div className="panel-heading panel-heading--tight">
           <div>
             <p className="panel-kicker">Configuration</p>
+            <h2>Feeds</h2>
+          </div>
+          <button
+            className="mini-action"
+            type="button"
+            disabled={serviceConfigBusy}
+            onClick={saveServiceConfig}
+          >
+            {serviceConfigBusy ? 'Saving' : 'Save Feed Config'}
+          </button>
+        </div>
+
+        <div className="settings-grid">
+          <article className="settings-box">
+            <div className="settings-box__header">
+              <h3>NWWS</h3>
+              <label className="toggle-line">
+                <input
+                  type="checkbox"
+                  checked={serviceConfig.nwws.enabled}
+                  onChange={(event) => updateNwwsConfig({ enabled: event.target.checked })}
+                />
+                Enabled
+              </label>
+            </div>
+            <div className="camera-form-grid camera-form-grid--settings">
+              <label>
+                Username
+                <input
+                  value={serviceConfig.nwws.username}
+                  onChange={(event) => updateNwwsConfig({ username: event.target.value })}
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={serviceConfig.nwws.password}
+                  onChange={(event) => updateNwwsConfig({ password: event.target.value })}
+                />
+              </label>
+              <label>
+                Nickname
+                <input
+                  value={serviceConfig.nwws.nickname}
+                  onChange={(event) => updateNwwsConfig({ nickname: event.target.value })}
+                />
+              </label>
+              <label>
+                Reconnect Sec
+                <input
+                  value={serviceConfig.nwws.reconnectIntervalSeconds}
+                  inputMode="numeric"
+                  onChange={(event) =>
+                    updateNwwsConfig({ reconnectIntervalSeconds: event.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Backfill Sec
+                <input
+                  value={serviceConfig.nwws.backfillIntervalSeconds}
+                  inputMode="numeric"
+                  onChange={(event) =>
+                    updateNwwsConfig({ backfillIntervalSeconds: event.target.value })
+                  }
+                />
+              </label>
+            </div>
+          </article>
+
+          <article className="settings-box">
+            <div className="settings-box__header">
+              <h3>NWS API Fallback</h3>
+              <label className="toggle-line">
+                <input
+                  type="checkbox"
+                  checked={serviceConfig.nwsApi.enabled}
+                  onChange={(event) => updateNwsApiConfig({ enabled: event.target.checked })}
+                />
+                Enabled
+              </label>
+            </div>
+            <div className="camera-form-grid camera-form-grid--settings">
+              <label className="camera-url-field">
+                Endpoint
+                <input
+                  value={serviceConfig.nwsApi.endpoint}
+                  onChange={(event) => updateNwsApiConfig({ endpoint: event.target.value })}
+                />
+              </label>
+              <label>
+                Poll Sec
+                <input
+                  value={serviceConfig.nwsApi.pollIntervalSeconds}
+                  inputMode="numeric"
+                  onChange={(event) =>
+                    updateNwsApiConfig({ pollIntervalSeconds: event.target.value })
+                  }
+                />
+              </label>
+            </div>
+          </article>
+        </div>
+
+        <p className="test-note">
+          {serviceConfigMessage || 'Feed settings save to your local config. Restart after changing NWWS login or polling.'}
+        </p>
+      </section>
+
+      <section className="config-panel">
+        <div className="panel-heading panel-heading--tight">
+          <div>
+            <p className="panel-kicker">Configuration</p>
             <h2>Custom Cameras</h2>
           </div>
           <div className="config-actions">
@@ -805,7 +1036,7 @@ function App() {
         </div>
 
         <p className="config-help">
-          Add YouTube livestream embeds or watch URLs. Each camera needs lat/lon so severe, winter, and tropical widgets know when to show it.
+          Add YouTube livestream embeds or watch URLs. Lat/lon is optional for chaser cutaways.
         </p>
 
         <div className="camera-editor">
@@ -856,7 +1087,7 @@ function App() {
                     />
                   </label>
                   <label>
-                    Latitude
+                    Latitude Optional
                     <input
                       value={camera.latitude}
                       placeholder="35.4676"
@@ -867,7 +1098,7 @@ function App() {
                     />
                   </label>
                   <label>
-                    Longitude
+                    Longitude Optional
                     <input
                       value={camera.longitude}
                       placeholder="-97.5164"

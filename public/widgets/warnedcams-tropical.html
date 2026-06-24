@@ -151,7 +151,7 @@
 
       const settings = {
         refreshTime: Math.max(10, Number(params.get("setRefreshTime") || "60")),
-        rotationTime: Math.max(8, Number(params.get("setRotationTime") || "20")),
+        rotationTime: Math.max(20, Number(params.get("setRotationTime") || "20")),
         cameraDataUrl: params.get("setCameraDataUrl") || "/api/cameras-lite?widget=tropical",
         search: params.get("setSearch") || "",
         streamSource: (params.get("setStreamSource") || "*").toLowerCase(),
@@ -170,6 +170,9 @@
         cameras: [],
         matches: [],
         currentIndex: -1,
+        currentChaserIndex: -1,
+        rotationStep: 0,
+        chasers: [],
         currentStreamUrl: "",
         currentSignature: "",
         failedStreamUrls: new Set(),
@@ -380,6 +383,9 @@
           .sort((a, b) => b.theme.rank - a.theme.rank);
 
         const filteredStreams = state.cameras.filter((stream) => {
+          if (stream.properties?.is_custom) {
+            return false;
+          }
           if (settings.streamSource !== "*" && String(stream.properties.source || "").toLowerCase() !== settings.streamSource) {
             return false;
           }
@@ -407,6 +413,21 @@
         return matches;
       }
 
+      function getCustomChaserMatches(contextStorm) {
+        return state.cameras
+          .filter((stream) => {
+            const properties = stream?.properties || {};
+            if (!properties.is_custom) return false;
+            if (!properties.stream_url) return false;
+            if (settings.streamSource !== "*" && String(properties.source || "").toLowerCase() !== settings.streamSource) return false;
+            if (settings.search) {
+              const haystack = `${properties.name || ""} ${properties.location || ""} ${properties.source || ""}`.toLowerCase();
+              if (!haystack.includes(settings.search.toLowerCase())) return false;
+            }
+            return true;
+          })
+          .map((stream) => ({ stream, storm: contextStorm || null, isChaserCutaway: true }));
+      }
       async function loadStream(match) {
         const url = match?.stream?.properties?.stream_url;
         if (!url) {
@@ -472,6 +493,22 @@
       }
 
       function rotateToNext(skipFailed = false) {
+        const shouldShowChaser = state.chasers.length && (state.rotationStep % 4 === 3 || !state.matches.length);
+        state.rotationStep += 1;
+
+        if (shouldShowChaser) {
+          const totalChasers = state.chasers.length;
+          for (let offset = 1; offset <= totalChasers; offset += 1) {
+            const nextIndex = (state.currentChaserIndex + offset + totalChasers) % totalChasers;
+            const nextMatch = state.chasers[nextIndex];
+            const nextUrl = nextMatch?.stream?.properties?.stream_url;
+            if (skipFailed && nextUrl && state.failedStreamUrls.has(nextUrl)) continue;
+            state.currentChaserIndex = nextIndex;
+            loadStream(nextMatch);
+            return;
+          }
+        }
+
         if (!state.matches.length) {
           state.currentIndex = -1;
           updateOverlay(null, "No cameras near active Atlantic tropical systems right now");
@@ -494,20 +531,25 @@
       async function syncMatches() {
         try {
           const storms = await fetchStormData();
-          const nextSignature = storms
-            .filter(isAtlanticStorm)
-            .map((storm) => `${storm?.id || ""}|${storm?.lastUpdate || ""}|${storm?.publicAdvisory?.advNum || ""}`)
-            .join("||");
-          if (nextSignature === state.currentSignature && state.matches.length) return;
+          const activeStorms = storms.filter(isAtlanticStorm);
+          const matches = getMatches(storms);
+          const chasers = activeStorms.length ? getCustomChaserMatches(activeStorms[0]) : [];
+          const nextSignature = [
+            ...activeStorms.map((storm) => `${storm?.id || ""}|${storm?.lastUpdate || ""}|${storm?.publicAdvisory?.advNum || ""}`),
+            ...chasers.map((match) => `chaser|${match?.stream?.properties?.cameraId || match?.stream?.properties?.stream_url || ""}`),
+          ].join("||");
+          if (nextSignature === state.currentSignature && (state.matches.length || state.chasers.length)) return;
           state.currentSignature = nextSignature;
-          const previousUrl = state.matches[state.currentIndex]?.stream?.properties?.stream_url || "";
-          state.matches = getMatches(storms);
-          const activeUrls = new Set(state.matches.map((match) => match?.stream?.properties?.stream_url).filter(Boolean));
+          const previousUrl = state.matches[state.currentIndex]?.stream?.properties?.stream_url || state.chasers[state.currentChaserIndex]?.stream?.properties?.stream_url || "";
+          state.matches = matches;
+          state.chasers = chasers;
+          const activeUrls = new Set([...state.matches, ...state.chasers].map((match) => match?.stream?.properties?.stream_url).filter(Boolean));
           state.failedStreamUrls.forEach((url) => {
             if (!activeUrls.has(url)) state.failedStreamUrls.delete(url);
           });
-          if (!state.matches.length) {
+          if (!state.matches.length && !state.chasers.length) {
             state.currentIndex = -1;
+            state.currentChaserIndex = -1;
             updateOverlay(null, "No cameras near active Atlantic tropical systems right now");
             return;
           }
@@ -523,7 +565,7 @@
       function startRotationLoop() {
         if (state.rotationTimer) clearInterval(state.rotationTimer);
         state.rotationTimer = setInterval(() => {
-          if (state.matches.length) rotateToNext(true);
+          if (state.matches.length || state.chasers.length) rotateToNext(true);
         }, settings.rotationTime * 1000);
       }
 
@@ -540,3 +582,6 @@
   </script>
 </body>
 </html>
+
+
+

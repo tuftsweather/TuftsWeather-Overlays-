@@ -13,7 +13,8 @@
              },
     "nwsApi":  {
                    "endpoint":  "https://api.weather.gov/alerts/active",
-                   "pollIntervalSeconds":  30
+                   "pollIntervalSeconds":  30,
+                   "enabled":  true
                },
     "filters":  {
                     "events":  [
