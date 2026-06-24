@@ -544,6 +544,25 @@
         return value.includes("youtube.com/embed/") || value.includes("youtube.com/live/") || value.includes("youtube.com/watch") || value.includes("youtu.be/") || value.includes("twitch.tv/");
       }
 
+      function cleanEmbedUrl(url) {
+        const value = String(url || "").replace(/&amp;/g, "&");
+        if (!value.includes("youtube.com/embed/")) return value;
+        try {
+          const parsed = new URL(value, window.location.origin);
+          parsed.searchParams.set("autoplay", "1");
+          parsed.searchParams.set("mute", "1");
+          parsed.searchParams.set("controls", "0");
+          parsed.searchParams.set("modestbranding", "1");
+          parsed.searchParams.set("rel", "0");
+          parsed.searchParams.set("iv_load_policy", "3");
+          parsed.searchParams.set("playsinline", "1");
+          parsed.searchParams.set("disablekb", "1");
+          return parsed.toString();
+        } catch {
+          return value;
+        }
+      }
+
       function showEmbed(url) {
         if (state.hls) {
           state.hls.destroy();
@@ -553,7 +572,7 @@
         elements.video.removeAttribute("src");
         elements.video.load();
         elements.video.style.opacity = "0";
-        elements.embedFrame.src = String(url || "").replace(/&amp;/g, "&");
+        elements.embedFrame.src = cleanEmbedUrl(url);
         elements.embedFrame.style.opacity = "1";
       }
       function clearCurrentStream() {
@@ -581,7 +600,7 @@
         }
 
         const theme = match.isChaserCutaway
-          ? { label: "LIVE CHASER", primary: "#111827", secondary: "#060910" }
+          ? { label: "LIVE CHASER", primary: "#c90000", secondary: "#8b0000" }
           : classifyAlert(match.event);
         document.documentElement.style.setProperty("--overlay-primary", theme.primary);
         document.documentElement.style.setProperty("--overlay-secondary", theme.secondary);
@@ -898,6 +917,7 @@
   </script>
 </body>
 </html>
+
 
 
 

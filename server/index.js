@@ -314,13 +314,13 @@ function normalizeCustomCameraUrl(url) {
 
   const youtubeWatch = value.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/i);
   if (youtubeWatch) {
-    return `https://www.youtube.com/embed/${youtubeWatch[1]}?autoplay=1&mute=1`;
+    return `https://www.youtube.com/embed/${youtubeWatch[1]}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&disablekb=1`;
   }
 
   if (value.includes('youtube.com/live/')) {
     const id = value.match(/youtube\.com\/live\/([A-Za-z0-9_-]{6,})/i)?.[1];
     if (id) {
-      return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1`;
+      return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&disablekb=1`;
     }
   }
 

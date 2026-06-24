@@ -194,12 +194,12 @@ function getEmbedPreviewUrl(url: string) {
 
   const watchMatch = value.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/i)
   if (watchMatch) {
-    return `https://www.youtube.com/embed/${watchMatch[1]}?autoplay=0&mute=1`
+    return `https://www.youtube.com/embed/${watchMatch[1]}?autoplay=0&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&disablekb=1`
   }
 
   const liveMatch = value.match(/youtube\.com\/live\/([A-Za-z0-9_-]{6,})/i)
   if (liveMatch) {
-    return `https://www.youtube.com/embed/${liveMatch[1]}?autoplay=0&mute=1`
+    return `https://www.youtube.com/embed/${liveMatch[1]}?autoplay=0&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&disablekb=1`
   }
 
   if (value.includes('youtube.com/embed/')) {
