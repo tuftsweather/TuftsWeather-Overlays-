@@ -36,13 +36,15 @@
       background: #000;
     }
 
-    #video {
+    #video,
+    #embedFrame {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
       background: #000;
+      border: 0;
       opacity: 0;
       transition: opacity 0.45s ease;
     }
@@ -145,6 +147,7 @@
 <body>
   <div class="root">
     <video id="video" autoplay playsinline muted></video>
+    <iframe id="embedFrame" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
     <div class="top-pill hidden" id="topPill">
       <div class="top-pill__content">
         <span class="top-pill__warning" id="warningText">Winter Storm Warning</span>
@@ -163,6 +166,7 @@
       const params = new URLSearchParams(window.location.search);
       const elements = {
         video: document.getElementById("video"),
+        embedFrame: document.getElementById("embedFrame"),
         topPill: document.getElementById("topPill"),
         warningText: document.getElementById("warningText"),
         locationText: document.getElementById("locationText"),
@@ -173,8 +177,8 @@
       const settings = {
         refreshTime: Math.max(5, Number(params.get("setRefreshTime") || "15")),
         rotationTime: Math.max(5, Number(params.get("setRotationTime") || "20")),
-        matchesUrl: params.get("setMatchesUrl") || "/api/warned-cameras",
-        cameraDataUrl: params.get("setCameraDataUrl") || "/api/cameras-lite",
+        matchesUrl: params.get("setMatchesUrl") || "/api/warned-cameras?widget=winter",
+        cameraDataUrl: params.get("setCameraDataUrl") || "/api/cameras-lite?widget=winter",
         fallbackCameraDataUrl: params.get("setFallbackCameraDataUrl") || "/api/cameras?v=21",
         search: params.get("setSearch") || "",
         streamSource: (params.get("setStreamSource") || "*").toLowerCase(),
@@ -530,6 +534,24 @@
           : [];
       }
 
+      
+      function isEmbedUrl(url) {
+        const value = String(url || "").toLowerCase();
+        return value.includes("youtube.com/embed/") || value.includes("youtube.com/live/") || value.includes("youtube.com/watch") || value.includes("youtu.be/") || value.includes("twitch.tv/");
+      }
+
+      function showEmbed(url) {
+        if (state.hls) {
+          state.hls.destroy();
+          state.hls = null;
+        }
+        elements.video.pause();
+        elements.video.removeAttribute("src");
+        elements.video.load();
+        elements.video.style.opacity = "0";
+        elements.embedFrame.src = url;
+        elements.embedFrame.style.opacity = "1";
+      }
       function clearCurrentStream() {
         clearTimeout(state.connectTimeout);
         if (state.hls) {
@@ -541,6 +563,8 @@
         elements.video.removeAttribute("src");
         elements.video.load();
         elements.video.style.opacity = "0";
+        elements.embedFrame.removeAttribute("src");
+        elements.embedFrame.style.opacity = "0";
       }
 
       function updateOverlay(match, message = "No winter warning cameras available right now") {
@@ -660,6 +684,13 @@
         }
 
         state.currentStreamUrl = url;
+        if (isEmbedUrl(url)) {
+          showEmbed(url);
+          updateOverlay(match);
+          return;
+        }
+        elements.embedFrame.removeAttribute("src");
+        elements.embedFrame.style.opacity = "0";
         elements.video.style.opacity = "0";
         clearTimeout(state.connectTimeout);
 

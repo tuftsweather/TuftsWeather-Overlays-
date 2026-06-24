@@ -19,6 +19,26 @@ type OverlayGroup = {
   overlays: Array<OverlayCard & { fullUrl: string }>
 }
 
+type CustomCameraItem = {
+  enabled: boolean
+  name: string
+  location: string
+  latitude: string
+  longitude: string
+  url: string
+  source: string
+  widgets: {
+    severe: boolean
+    winter: boolean
+    tropical: boolean
+  }
+}
+
+type CustomCameraConfig = {
+  enabled: boolean
+  items: CustomCameraItem[]
+}
+
 const testAlerts = [
   { key: 'tornado-emergency', label: 'Tornado Emergency' },
   { key: 'pds-tornado', label: 'PDS Tornado' },
@@ -85,11 +105,56 @@ function classifyOverlayGroup(overlay: OverlayCard & { fullUrl: string }) {
   return 'warnings'
 }
 
+function makeBlankCustomCamera(): CustomCameraItem {
+  return {
+    enabled: true,
+    name: '',
+    location: '',
+    latitude: '',
+    longitude: '',
+    url: '',
+    source: 'custom-chaser',
+    widgets: {
+      severe: true,
+      winter: false,
+      tropical: false,
+    },
+  }
+}
+
+function normalizeCustomCameraConfig(payload: Partial<CustomCameraConfig> | null): CustomCameraConfig {
+  return {
+    enabled: Boolean(payload?.enabled),
+    items: Array.isArray(payload?.items)
+      ? payload.items.map((item) => ({
+          enabled: item.enabled !== false,
+          name: String(item.name ?? ''),
+          location: String(item.location ?? ''),
+          latitude: Number.isFinite(Number(item.latitude)) ? String(item.latitude) : '',
+          longitude: Number.isFinite(Number(item.longitude)) ? String(item.longitude) : '',
+          url: String(item.url ?? ''),
+          source: String(item.source || 'custom-chaser'),
+          widgets: {
+            severe: item.widgets?.severe !== false,
+            winter: Boolean(item.widgets?.winter),
+            tropical: Boolean(item.widgets?.tropical),
+          },
+        }))
+      : [],
+  }
+}
+
 function App() {
   const [service, setService] = useState<ServiceSnapshot>(fallbackServiceSnapshot)
   const [copiedUrl, setCopiedUrl] = useState('')
   const [testBusy, setTestBusy] = useState('')
   const [testMessage, setTestMessage] = useState('')
+  const [customCameras, setCustomCameras] = useState<CustomCameraConfig>({
+    enabled: false,
+    items: [],
+  })
+  const [cameraConfigBusy, setCameraConfigBusy] = useState(false)
+  const [cameraConfigMessage, setCameraConfigMessage] = useState('')
 
   useEffect(() => {
     let active = true
@@ -161,6 +226,36 @@ function App() {
     return () => {
       active = false
       window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const loadCustomCameras = async () => {
+      const baseUrl =
+        window.location.port === '4173' ? 'http://127.0.0.1:4318' : ''
+
+      try {
+        const response = await fetch(`${baseUrl}/api/config/custom-cameras`)
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        const payload = await response.json()
+        if (active) {
+          setCustomCameras(normalizeCustomCameraConfig(payload))
+        }
+      } catch {
+        if (active) {
+          setCameraConfigMessage('Custom camera config could not load')
+        }
+      }
+    }
+
+    void loadCustomCameras()
+
+    return () => {
+      active = false
     }
   }, [])
 
@@ -407,6 +502,68 @@ function App() {
     }
   }
 
+  function updateCustomCamera(index: number, patch: Partial<CustomCameraItem>) {
+    setCustomCameras((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...patch } : item,
+      ),
+    }))
+  }
+
+  function updateCustomCameraWidget(index: number, key: keyof CustomCameraItem['widgets'], value: boolean) {
+    setCustomCameras((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) =>
+        itemIndex === index
+          ? { ...item, widgets: { ...item.widgets, [key]: value } }
+          : item,
+      ),
+    }))
+  }
+
+  function addCustomCamera() {
+    setCustomCameras((current) => ({
+      ...current,
+      enabled: true,
+      items: [...current.items, makeBlankCustomCamera()],
+    }))
+  }
+
+  function removeCustomCamera(index: number) {
+    setCustomCameras((current) => ({
+      ...current,
+      items: current.items.filter((_, itemIndex) => itemIndex !== index),
+    }))
+  }
+
+  async function saveCustomCameras() {
+    const baseUrl =
+      window.location.port === '4173' ? 'http://127.0.0.1:4318' : ''
+
+    setCameraConfigBusy(true)
+    setCameraConfigMessage('')
+    try {
+      const response = await fetch(`${baseUrl}/api/config/custom-cameras`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(customCameras),
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const payload = await response.json()
+      setCustomCameras(normalizeCustomCameraConfig(payload))
+      setCameraConfigMessage('Custom cameras saved. Camera widgets update on their next refresh.')
+    } catch {
+      setCameraConfigMessage('Save failed')
+    } finally {
+      setCameraConfigBusy(false)
+    }
+  }
+
   return (
     <main className="dashboard-shell">
       <section className="dashboard-hero">
@@ -610,6 +767,165 @@ function App() {
 
         <p className="test-note">
           Severe tests show on the severe strip, tropical tests show on the tropical strip, and winter tests show on the winter strip and winter scenes.
+        </p>
+      </section>
+
+      <section className="config-panel">
+        <div className="panel-heading panel-heading--tight">
+          <div>
+            <p className="panel-kicker">Configuration</p>
+            <h2>Custom Cameras</h2>
+          </div>
+          <div className="config-actions">
+            <label className="toggle-line">
+              <input
+                type="checkbox"
+                checked={customCameras.enabled}
+                onChange={(event) =>
+                  setCustomCameras((current) => ({
+                    ...current,
+                    enabled: event.target.checked,
+                  }))
+                }
+              />
+              Enabled
+            </label>
+            <button className="mini-action" type="button" onClick={addCustomCamera}>
+              Add Camera
+            </button>
+            <button
+              className="mini-action"
+              type="button"
+              disabled={cameraConfigBusy}
+              onClick={saveCustomCameras}
+            >
+              {cameraConfigBusy ? 'Saving' : 'Save'}
+            </button>
+          </div>
+        </div>
+
+        <p className="config-help">
+          Add YouTube livestream embeds or watch URLs. Each camera needs lat/lon so severe, winter, and tropical widgets know when to show it.
+        </p>
+
+        <div className="camera-editor">
+          {customCameras.items.length === 0 ? (
+            <div className="empty-config">
+              No custom cameras yet. Hit Add Camera and paste a YouTube livestream.
+            </div>
+          ) : (
+            customCameras.items.map((camera, index) => (
+              <article key={`${index}-${camera.name}`} className="camera-row">
+                <div className="camera-row__header">
+                  <label className="toggle-line">
+                    <input
+                      type="checkbox"
+                      checked={camera.enabled}
+                      onChange={(event) =>
+                        updateCustomCamera(index, { enabled: event.target.checked })
+                      }
+                    />
+                    Camera On
+                  </label>
+                  <button
+                    className="mini-action"
+                    type="button"
+                    onClick={() => removeCustomCamera(index)}
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div className="camera-form-grid">
+                  <label>
+                    Name
+                    <input
+                      value={camera.name}
+                      placeholder="Chaser name"
+                      onChange={(event) => updateCustomCamera(index, { name: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Location
+                    <input
+                      value={camera.location}
+                      placeholder="City, ST"
+                      onChange={(event) =>
+                        updateCustomCamera(index, { location: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Latitude
+                    <input
+                      value={camera.latitude}
+                      placeholder="35.4676"
+                      inputMode="decimal"
+                      onChange={(event) =>
+                        updateCustomCamera(index, { latitude: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Longitude
+                    <input
+                      value={camera.longitude}
+                      placeholder="-97.5164"
+                      inputMode="decimal"
+                      onChange={(event) =>
+                        updateCustomCamera(index, { longitude: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="camera-url-field">
+                    YouTube / Stream URL
+                    <input
+                      value={camera.url}
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      onChange={(event) => updateCustomCamera(index, { url: event.target.value })}
+                    />
+                  </label>
+                </div>
+
+                <div className="camera-widget-toggles">
+                  <label className="toggle-line">
+                    <input
+                      type="checkbox"
+                      checked={camera.widgets.severe}
+                      onChange={(event) =>
+                        updateCustomCameraWidget(index, 'severe', event.target.checked)
+                      }
+                    />
+                    Severe
+                  </label>
+                  <label className="toggle-line">
+                    <input
+                      type="checkbox"
+                      checked={camera.widgets.winter}
+                      onChange={(event) =>
+                        updateCustomCameraWidget(index, 'winter', event.target.checked)
+                      }
+                    />
+                    Winter
+                  </label>
+                  <label className="toggle-line">
+                    <input
+                      type="checkbox"
+                      checked={camera.widgets.tropical}
+                      onChange={(event) =>
+                        updateCustomCameraWidget(index, 'tropical', event.target.checked)
+                      }
+                    />
+                    Tropical
+                  </label>
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+
+        <p className="test-note">
+          {cameraConfigMessage || 'This saves to your local config file and works for 10+ custom cameras.'}
         </p>
       </section>
 

@@ -72,6 +72,48 @@ Leave `username` and `password` blank if you only want the public NWS API fallba
 
 Do not put credentials in `config/localoverlays.json`. That file is the shared default that updates can replace.
 
+## Add Custom Camera / Chaser Streams
+
+The easiest way is the dashboard:
+
+```text
+http://127.0.0.1:4318/
+```
+
+Open `Configuration > Custom Cameras`, add a camera, paste the YouTube livestream URL, enter latitude/longitude, choose Severe/Winter/Tropical, then save.
+
+You can also edit `config/localoverlays.local.json` directly.
+
+Each custom camera needs a name, a URL, and a latitude/longitude so the warned camera widgets know whether it is inside a warning area. You can add as many entries as you want.
+
+```json
+{
+  "customCameras": {
+    "enabled": true,
+    "items": [
+      {
+        "enabled": true,
+        "name": "Example Chaser",
+        "location": "Oklahoma City, OK",
+        "latitude": 35.4676,
+        "longitude": -97.5164,
+        "url": "https://www.youtube.com/embed/VIDEO_ID?autoplay=1&mute=1",
+        "source": "custom-chaser",
+        "widgets": {
+          "severe": true,
+          "winter": false,
+          "tropical": true
+        }
+      }
+    ]
+  }
+}
+```
+
+You can also paste a normal YouTube watch URL like `https://www.youtube.com/watch?v=VIDEO_ID`; the server will convert it to an embed URL automatically.
+
+Restart TuftsWeather Overlays after changing the config.
+
 ## Start
 
 - Windows: `build-tools/start-windows.cmd`

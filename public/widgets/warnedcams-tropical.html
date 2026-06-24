@@ -25,13 +25,15 @@
       color: #fff;
     }
     .root { position: fixed; inset: 0; background: #000; }
-    #video {
+    #video,
+    #embedFrame {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
       background: #000;
+      border: 0;
       opacity: 0;
       transition: opacity 0.45s ease;
     }
@@ -120,6 +122,7 @@
 <body>
   <div class="root">
     <video id="video" autoplay playsinline muted></video>
+    <iframe id="embedFrame" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
     <div class="top-pill hidden" id="topPill">
       <div class="top-pill__content">
         <span class="top-pill__warning" id="warningText">Atlantic Tropical System</span>
@@ -138,6 +141,7 @@
       const params = new URLSearchParams(window.location.search);
       const elements = {
         video: document.getElementById("video"),
+        embedFrame: document.getElementById("embedFrame"),
         topPill: document.getElementById("topPill"),
         warningText: document.getElementById("warningText"),
         locationText: document.getElementById("locationText"),
@@ -148,7 +152,7 @@
       const settings = {
         refreshTime: Math.max(10, Number(params.get("setRefreshTime") || "60")),
         rotationTime: Math.max(8, Number(params.get("setRotationTime") || "20")),
-        cameraDataUrl: params.get("setCameraDataUrl") || "/api/cameras-lite",
+        cameraDataUrl: params.get("setCameraDataUrl") || "/api/cameras-lite?widget=tropical",
         search: params.get("setSearch") || "",
         streamSource: (params.get("setStreamSource") || "*").toLowerCase(),
         maxDistanceMiles: Math.max(25, Number(params.get("setMaxDistanceMiles") || "175")),
@@ -307,6 +311,24 @@
         state.cameras = features.map(normalizeCamera).filter(Boolean);
       }
 
+      
+      function isEmbedUrl(url) {
+        const value = String(url || "").toLowerCase();
+        return value.includes("youtube.com/embed/") || value.includes("youtube.com/live/") || value.includes("youtube.com/watch") || value.includes("youtu.be/") || value.includes("twitch.tv/");
+      }
+
+      function showEmbed(url) {
+        if (state.hls) {
+          state.hls.destroy();
+          state.hls = null;
+        }
+        elements.video.pause();
+        elements.video.removeAttribute("src");
+        elements.video.load();
+        elements.video.style.opacity = "0";
+        elements.embedFrame.src = url;
+        elements.embedFrame.style.opacity = "1";
+      }
       function clearCurrentStream() {
         clearTimeout(state.connectTimeout);
         if (state.hls) {
@@ -318,6 +340,8 @@
         elements.video.removeAttribute("src");
         elements.video.load();
         elements.video.style.opacity = "0";
+        elements.embedFrame.removeAttribute("src");
+        elements.embedFrame.style.opacity = "0";
       }
 
       function updateOverlay(match, message = "No cameras near active Atlantic tropical systems right now") {
@@ -392,6 +416,13 @@
         updateOverlay(match);
         if (state.currentStreamUrl === url) return;
         state.currentStreamUrl = url;
+        if (isEmbedUrl(url)) {
+          showEmbed(url);
+          updateOverlay(match);
+          return;
+        }
+        elements.embedFrame.removeAttribute("src");
+        elements.embedFrame.style.opacity = "0";
         elements.video.style.opacity = "0";
         clearTimeout(state.connectTimeout);
         if (state.hls) {

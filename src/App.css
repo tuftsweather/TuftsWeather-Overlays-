@@ -25,6 +25,7 @@
 .connection-card,
 .launch-panel,
 .test-panel,
+.config-panel,
 .panel,
 .summary-card,
 .launch-card,
@@ -149,6 +150,7 @@
 
 .launch-panel,
 .test-panel,
+.config-panel,
 .panel {
   padding: 0.95rem;
 }
@@ -215,6 +217,106 @@
 .test-panel {
   display: grid;
   gap: 0.8rem;
+}
+
+.config-panel {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.config-actions,
+.camera-row__header,
+.camera-widget-toggles {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.config-help {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.camera-editor {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.camera-row,
+.empty-config {
+  border: 1px solid var(--line);
+  background: #11161e;
+  border-radius: 6px;
+  padding: 0.85rem;
+}
+
+.camera-row {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.camera-row__header {
+  justify-content: space-between;
+}
+
+.camera-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 150px 150px;
+  gap: 0.65rem;
+}
+
+.camera-form-grid label,
+.toggle-line {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.camera-form-grid label {
+  display: grid;
+  gap: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.camera-form-grid input {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  background: #0d1118;
+  color: #f4f7fc;
+  padding: 0 0.65rem;
+  font: inherit;
+  font-size: 0.86rem;
+  letter-spacing: 0;
+}
+
+.camera-form-grid input:focus {
+  outline: 1px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 0;
+}
+
+.camera-url-field {
+  grid-column: 1 / -1;
+}
+
+.toggle-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  color: #f4f7fc;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.toggle-line input {
+  accent-color: #b0181b;
+}
+
+.empty-config {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
 }
 
 .test-grid {
@@ -440,6 +542,7 @@ h4 {
 @media (max-width: 1100px) {
   .dashboard-hero,
   .content-grid,
+  .camera-form-grid,
   .overlay-grid,
   .summary-strip {
     grid-template-columns: 1fr;
@@ -462,6 +565,7 @@ h4 {
 
   .launch-grid,
   .overlay-grid,
+  .camera-form-grid,
   .test-grid {
     grid-template-columns: 1fr;
   }
@@ -469,6 +573,7 @@ h4 {
   .panel-heading,
   .overlay-card__header,
   .overlay-group__header,
+  .camera-row__header,
   .launch-card__top {
     flex-direction: column;
   }

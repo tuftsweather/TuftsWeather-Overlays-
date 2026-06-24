@@ -1,31 +1,60 @@
 {
-  "server": {
-    "host": "127.0.0.1",
-    "port": 4318
-  },
-  "nwws": {
-    "enabled": true,
-    "username": "",
-    "password": "",
-    "nickname": "TuftsWeather Overlays",
-    "reconnectIntervalSeconds": 60,
-    "backfillIntervalSeconds": 60
-  },
-  "nwsApi": {
-    "endpoint": "https://api.weather.gov/alerts/active",
-    "pollIntervalSeconds": 30
-  },
-  "filters": {
-    "events": [],
-    "ignoredEvents": [
-      "Xx",
-      "Test Message"
-    ],
-    "ignoredIcao": [],
-    "filteredIcao": [],
-    "ugcFilter": [],
-    "stateFilter": [],
-    "ignoreTestProducts": true,
-    "checkExpired": true
-  }
+    "server":  {
+                   "host":  "127.0.0.1",
+                   "port":  4318
+               },
+    "nwws":  {
+                 "enabled":  true,
+                 "username":  "",
+                 "password":  "",
+                 "nickname":  "TuftsWeather Overlays",
+                 "reconnectIntervalSeconds":  60,
+                 "backfillIntervalSeconds":  60
+             },
+    "nwsApi":  {
+                   "endpoint":  "https://api.weather.gov/alerts/active",
+                   "pollIntervalSeconds":  30
+               },
+    "filters":  {
+                    "events":  [
+
+                               ],
+                    "ignoredEvents":  [
+                                          "Xx",
+                                          "Test Message"
+                                      ],
+                    "ignoredIcao":  [
+
+                                    ],
+                    "filteredIcao":  [
+
+                                     ],
+                    "ugcFilter":  [
+
+                                  ],
+                    "stateFilter":  [
+
+                                    ],
+                    "ignoreTestProducts":  true,
+                    "checkExpired":  true
+                },
+    "customCameras":  {
+                          "enabled":  false,
+                          "items":  [
+                                        {
+                                            "enabled":  false,
+                                            "name":  "Example YouTube Chaser",
+                                            "location":  "Example Location",
+                                            "latitude":  35.4676,
+                                            "longitude":  -97.5164,
+                                            "url":  "https://www.youtube.com/embed/VIDEO_ID?autoplay=1\u0026mute=1",
+                                            "source":  "custom-chaser",
+                                            "widgets":  {
+                                                            "severe":  true,
+                                                            "winter":  false,
+                                                            "tropical":  false
+                                                        }
+                                        }
+                                    ]
+                      }
 }

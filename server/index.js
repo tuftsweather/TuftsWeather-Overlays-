@@ -46,6 +46,10 @@ const defaultConfig = {
     ignoreTestProducts: true,
     checkExpired: true,
   },
+  customCameras: {
+    enabled: false,
+    items: [],
+  },
 };
 
 function mergeConfig(base, incoming) {
@@ -98,6 +102,60 @@ function makeFeatureCollection(features = []) {
 }
 
 const runtimeConfig = loadConfig();
+
+function readConfigFile() {
+  ensureConfigFile();
+  if (!fs.existsSync(configPath)) {
+    return {};
+  }
+
+  const raw = fs.readFileSync(configPath, 'utf8');
+  return JSON.parse(raw);
+}
+
+function writeConfigFile(config) {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+function toFiniteConfigNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === '') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function sanitizeCustomCameraConfig(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const items = Array.isArray(source.items) ? source.items : [];
+
+  return {
+    enabled: Boolean(source.enabled),
+    items: items
+      .slice(0, 100)
+      .map((item) => {
+        const value = item && typeof item === 'object' ? item : {};
+        const latitude = toFiniteConfigNumber(value.latitude ?? value.lat);
+        const longitude = toFiniteConfigNumber(value.longitude ?? value.lon ?? value.lng);
+        return {
+          enabled: value.enabled !== false,
+          name: String(value.name || '').trim(),
+          location: String(value.location || '').trim(),
+          latitude,
+          longitude,
+          url: String(value.url || value.embedUrl || value.streamUrl || '').trim(),
+          source: String(value.source || 'custom-chaser').trim(),
+          widgets: {
+            severe: value.widgets?.severe !== false,
+            winter: Boolean(value.widgets?.winter),
+            tropical: Boolean(value.widgets?.tropical),
+          },
+        };
+      })
+      .filter((item) => item.name || item.url || Number.isFinite(item.latitude) || Number.isFinite(item.longitude)),
+  };
+}
 
 fs.mkdirSync(parserStorageDir, { recursive: true });
 
@@ -215,18 +273,98 @@ function pickFirstUrl(values) {
 
 function isLikelyVideoUrl(url) {
   const value = String(url || '').toLowerCase();
-  return value.includes('.m3u8') || value.includes('/playlist') || value.includes('/manifest');
+  return value.includes('.m3u8') ||
+    value.includes('/playlist') ||
+    value.includes('/manifest') ||
+    value.includes('youtube.com/') ||
+    value.includes('youtu.be/') ||
+    value.includes('twitch.tv/');
 }
 
-function getCameraLitePayload() {
+function normalizeCustomCameraUrl(url) {
+  const value = String(url || '').trim();
+  if (!value) {
+    return '';
+  }
+
+  const youtubeWatch = value.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/i);
+  if (youtubeWatch) {
+    return `https://www.youtube.com/embed/${youtubeWatch[1]}?autoplay=1&mute=1`;
+  }
+
+  if (value.includes('youtube.com/live/')) {
+    const id = value.match(/youtube\.com\/live\/([A-Za-z0-9_-]{6,})/i)?.[1];
+    if (id) {
+      return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1`;
+    }
+  }
+
+  return value;
+}
+
+function getCustomCameraFeatures(widget = 'severe') {
+  const custom = runtimeConfig.customCameras || {};
+  if (!custom.enabled || !Array.isArray(custom.items)) {
+    return [];
+  }
+
+  const features = [];
+  for (const [index, item] of custom.items.entries()) {
+    if (!item || item.enabled === false) {
+      continue;
+    }
+
+    const widgets = item.widgets || {};
+    if (widgets[widget] === false) {
+      continue;
+    }
+
+    const lat = Number(item.latitude ?? item.lat);
+    const lon = Number(item.longitude ?? item.lon ?? item.lng);
+    const streamUrl = normalizeCustomCameraUrl(item.embedUrl || item.streamUrl || item.url);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !streamUrl) {
+      continue;
+    }
+
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: [lon, lat],
+      },
+      properties: {
+        cameraId: `custom-${index}-${streamUrl}`,
+        name: String(item.name || `Custom Camera ${index + 1}`).trim(),
+        location: String(item.location || item.name || 'CUSTOM CAMERA').trim(),
+        source: String(item.source || 'custom-chaser').trim(),
+        state: String(item.state || 'CUSTOM').trim(),
+        stream_url: streamUrl,
+        embed_url: streamUrl,
+        is_custom: true,
+        widgets: {
+          severe: widgets.severe !== false,
+          winter: widgets.winter !== false,
+          tropical: widgets.tropical !== false,
+        },
+      },
+    });
+  }
+  return features;
+}
+
+function getCameraLitePayload(widget = 'severe') {
   if (!fs.existsSync(warnedCamerasPath)) {
-    return makeFeatureCollection();
+    return makeFeatureCollection(getCustomCameraFeatures(widget));
   }
 
   const stats = fs.statSync(warnedCamerasPath);
   const mtimeMs = stats.mtimeMs || 0;
   if (cameraLiteCache && cameraLiteCacheMtime === mtimeMs) {
-    return cameraLiteCache;
+    const customFeatures = getCustomCameraFeatures(widget);
+    return makeFeatureCollection([
+      ...cameraLiteCache.features,
+      ...customFeatures,
+    ]);
   }
 
   const raw = fs.readFileSync(warnedCamerasPath, 'utf8');
@@ -278,7 +416,10 @@ function getCameraLitePayload() {
 
   cameraLiteCache = makeFeatureCollection(features);
   cameraLiteCacheMtime = mtimeMs;
-  return cameraLiteCache;
+  return makeFeatureCollection([
+    ...features,
+    ...getCustomCameraFeatures(widget),
+  ]);
 }
 
 function getFeaturePolygonSet(feature) {
@@ -358,7 +499,7 @@ function haversineMiles(lat1, lon1, lat2, lon2) {
   return radiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', search = '', max = 80 } = {}) {
+function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', search = '', max = 80, widget = 'severe' } = {}) {
   const sourceFilter = String(streamSource || '*').toLowerCase();
   const searchFilter = String(search || '').trim().toLowerCase();
   const activeAlerts = getRelevantActiveAlerts()
@@ -385,7 +526,7 @@ function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', 
     return [];
   }
 
-  const cameras = getCameraLitePayload().features || [];
+  const cameras = getCameraLitePayload(widget).features || [];
   const matches = [];
   const seen = new Set();
 
@@ -2247,6 +2388,27 @@ app.get('/api/status', (_request, response) => {
   response.json(getStatusPayload());
 });
 
+app.get('/api/config/custom-cameras', (_request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  response.json(sanitizeCustomCameraConfig(runtimeConfig.customCameras));
+});
+
+app.post('/api/config/custom-cameras', express.json({ limit: '160kb' }), (request, response) => {
+  try {
+    const nextCustomCameras = sanitizeCustomCameraConfig(request.body);
+    const diskConfig = readConfigFile();
+    diskConfig.customCameras = nextCustomCameras;
+    writeConfigFile(diskConfig);
+    runtimeConfig.customCameras = nextCustomCameras;
+    response.setHeader('Cache-Control', 'no-store');
+    response.json(nextCustomCameras);
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 app.get('/api/cameras', (_request, response) => {
   if (!fs.existsSync(warnedCamerasPath)) {
     response.status(404).json({ error: 'Camera data not found' });
@@ -2257,19 +2419,22 @@ app.get('/api/cameras', (_request, response) => {
   response.sendFile(warnedCamerasPath);
 });
 
-app.get('/api/cameras-lite', (_request, response) => {
+app.get('/api/cameras-lite', (request, response) => {
+  const widget = String(request.query.widget || 'severe').toLowerCase();
   response.setHeader('Cache-Control', 'public, max-age=300');
-  response.json(getCameraLitePayload());
+  response.json(getCameraLitePayload(widget));
 });
 
 app.get('/api/warned-cameras', (request, response) => {
   const fallbackRadiusMiles = Math.max(5, Number(request.query.fallbackRadiusMiles || 18));
   const max = Math.min(200, Math.max(1, Number(request.query.max || 80)));
+  const widget = String(request.query.widget || 'severe').toLowerCase();
   response.setHeader('Cache-Control', 'no-store');
   response.json({
     matches: getWarnedCameraMatches({
       fallbackRadiusMiles,
       max,
+      widget,
       streamSource: request.query.streamSource,
       search: request.query.search,
     }),
