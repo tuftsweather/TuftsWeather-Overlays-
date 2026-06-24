@@ -80,11 +80,11 @@ The easiest way is the dashboard:
 http://127.0.0.1:4318/
 ```
 
-Open `Configuration > Custom Cameras`, add a camera, paste the YouTube livestream URL, choose Severe/Winter/Tropical, then save. Latitude/longitude is optional for chaser cutaways.
+Open `Configuration > Custom Cameras`, add a camera, paste the YouTube livestream URL, choose Severe/Winter/Tropical, preview it, then save.
 
 You can also edit `config/localoverlays.local.json` directly.
 
-Each custom camera needs a name and URL. If latitude/longitude is blank, it rotates in as a chaser cutaway every few cameras instead of being matched to an exact warning polygon. You can add as many entries as you want.
+Each custom camera only needs a name and URL. Location is optional. Custom chasers rotate in as cutaways every few cameras instead of needing an exact warning polygon location.
 
 ```json
 {
@@ -94,11 +94,7 @@ Each custom camera needs a name and URL. If latitude/longitude is blank, it rota
       {
         "enabled": true,
         "name": "Example Chaser",
-        "location": "Oklahoma City, OK",
-        "latitude": 35.4676,
-        "longitude": -97.5164,
         "url": "https://www.youtube.com/embed/VIDEO_ID?autoplay=1&mute=1",
-        "source": "custom-chaser",
         "widgets": {
           "severe": true,
           "winter": false,

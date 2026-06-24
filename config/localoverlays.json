@@ -45,11 +45,7 @@
                                         {
                                             "enabled":  false,
                                             "name":  "Example YouTube Chaser",
-                                            "location":  "Example Location",
-                                            "latitude":  35.4676,
-                                            "longitude":  -97.5164,
                                             "url":  "https://www.youtube.com/embed/VIDEO_ID?autoplay=1\u0026mute=1",
-                                            "source":  "custom-chaser",
                                             "widgets":  {
                                                             "severe":  true,
                                                             "winter":  false,

@@ -184,6 +184,29 @@ function normalizeServiceConfig(payload: Partial<ServiceConfig> | null): Service
   }
 }
 
+function getEmbedPreviewUrl(url: string) {
+  const value = String(url || '').trim()
+  if (!value) {
+    return ''
+  }
+
+  const watchMatch = value.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/i)
+  if (watchMatch) {
+    return `https://www.youtube.com/embed/${watchMatch[1]}?autoplay=0&mute=1`
+  }
+
+  const liveMatch = value.match(/youtube\.com\/live\/([A-Za-z0-9_-]{6,})/i)
+  if (liveMatch) {
+    return `https://www.youtube.com/embed/${liveMatch[1]}?autoplay=0&mute=1`
+  }
+
+  if (value.includes('youtube.com/embed/')) {
+    return value.replace(/autoplay=1/g, 'autoplay=0')
+  }
+
+  return ''
+}
+
 function App() {
   const [service, setService] = useState<ServiceSnapshot>(fallbackServiceSnapshot)
   const [copiedUrl, setCopiedUrl] = useState('')
@@ -1036,7 +1059,7 @@ function App() {
         </div>
 
         <p className="config-help">
-          Add YouTube livestream embeds or watch URLs. Lat/lon is optional for chaser cutaways.
+          Add YouTube livestream embeds or watch URLs. Only name and URL are needed; location is optional.
         </p>
 
         <div className="camera-editor">
@@ -1077,34 +1100,12 @@ function App() {
                     />
                   </label>
                   <label>
-                    Location
+                    Location Optional
                     <input
                       value={camera.location}
                       placeholder="City, ST"
                       onChange={(event) =>
                         updateCustomCamera(index, { location: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Latitude Optional
-                    <input
-                      value={camera.latitude}
-                      placeholder="35.4676"
-                      inputMode="decimal"
-                      onChange={(event) =>
-                        updateCustomCamera(index, { latitude: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Longitude Optional
-                    <input
-                      value={camera.longitude}
-                      placeholder="-97.5164"
-                      inputMode="decimal"
-                      onChange={(event) =>
-                        updateCustomCamera(index, { longitude: event.target.value })
                       }
                     />
                   </label>
@@ -1116,6 +1117,21 @@ function App() {
                       onChange={(event) => updateCustomCamera(index, { url: event.target.value })}
                     />
                   </label>
+                </div>
+
+                <div className="camera-preview">
+                  {getEmbedPreviewUrl(camera.url) ? (
+                    <iframe
+                      title={`${camera.name || 'Custom camera'} preview`}
+                      src={getEmbedPreviewUrl(camera.url)}
+                      allow="autoplay; encrypted-media; picture-in-picture"
+                      allowFullScreen
+                    />
+                  ) : (
+                    <div className="camera-preview__empty">
+                      Paste a YouTube watch, live, or embed URL to preview it here.
+                    </div>
+                  )}
                 </div>
 
                 <div className="camera-widget-toggles">
