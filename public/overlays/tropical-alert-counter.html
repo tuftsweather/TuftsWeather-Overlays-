@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tropical Alert Counter</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 620px;
+      background: transparent;
+      overflow: hidden;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .counter-container {
+      display: flex;
+      flex-direction: column;
+      width: 620px;
+      margin: 0;
+      padding: 0;
+    }
+
+    .counter {
+      width: 620px;
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 12px;
+      color: #ffffff;
+      font-size: 23px;
+      font-weight: 950;
+      line-height: 1;
+      text-align: center;
+      text-transform: uppercase;
+      text-shadow:
+        -1px -1px 0 rgba(0,0,0,0.82),
+        1px -1px 0 rgba(0,0,0,0.82),
+        -1px 1px 0 rgba(0,0,0,0.82),
+        1px 1px 0 rgba(0,0,0,0.82),
+        0 2px 0 rgba(0,0,0,0.5);
+    }
+
+    .tor { background: #d10000; }
+    .hur-warn { background: #a90000; }
+    .hur-watch { background: #a000c8; }
+    .ts-warn { background: #d48700; }
+    .ts-watch { background: #3f67a6; }
+
+    .changed { animation: pop 280ms ease-out; }
+    @keyframes pop {
+      0% { transform: scale(1); }
+      45% { transform: scale(1.06); }
+      100% { transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div class="counter-container">
+    <div class="counter tor" id="tornadoWarning">Tornado Warning: 0</div>
+    <div class="counter hur-warn" id="hurricaneWarning">Hurricane Warning: 0</div>
+    <div class="counter hur-watch" id="hurricaneWatch">Hurricane Watch: 0</div>
+    <div class="counter ts-warn" id="tropicalStormWarning">Tropical Storm Warning: 0</div>
+    <div class="counter ts-watch" id="tropicalStormWatch">Tropical Storm Watch: 0</div>
+  </div>
+
+  <script>
+    const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+    const labels = {
+      tornadoWarning: "Tornado Warning",
+      hurricaneWarning: "Hurricane Warning",
+      hurricaneWatch: "Hurricane Watch",
+      tropicalStormWarning: "Tropical Storm Warning",
+      tropicalStormWatch: "Tropical Storm Watch",
+    };
+    const lastCounts = {
+      tornadoWarning: 0,
+      hurricaneWarning: 0,
+      hurricaneWatch: 0,
+      tropicalStormWarning: 0,
+      tropicalStormWatch: 0,
+    };
+    let socket = null;
+    let reconnectTimer = null;
+
+    function animateIfChanged(el, changed) {
+      if (!changed) return;
+      el.classList.remove("changed");
+      void el.offsetWidth;
+      el.classList.add("changed");
+    }
+
+    function renderCounts(counts = {}) {
+      for (const key of Object.keys(labels)) {
+        const value = Number(counts[key] || 0);
+        const el = document.getElementById(key);
+        el.textContent = `${labels[key]}: ${value}`;
+        animateIfChanged(el, value !== lastCounts[key]);
+        lastCounts[key] = value;
+      }
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/api/status", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        renderCounts(payload?.summary?.tropicalCounts || {});
+      } catch (_) {}
+    }
+
+    function handleMessage(raw) {
+      try {
+        const data = JSON.parse(raw);
+        if (data.type === "subscribe" && data.value === "summary") {
+          renderCounts(data.message?.tropicalCounts || {});
+        } else if (data.type === "update" && data.message?.summary) {
+          renderCounts(data.message.summary.tropicalCounts || {});
+        }
+      } catch (_) {}
+    }
+
+    function connect() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+      socket = new WebSocket(wsUrl);
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({ type: "subscribe", message: ["summary"] }));
+        refresh();
+      });
+      socket.addEventListener("message", (event) => handleMessage(event.data));
+      socket.addEventListener("close", () => {
+        socket = null;
+        if (!reconnectTimer) {
+          reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, 1000);
+        }
+      });
+      socket.addEventListener("error", () => socket && socket.close());
+    }
+
+    refresh();
+    connect();
+    window.setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TuftsWeather Overlays Active Warning Strip</title>
+  <style>
+    :root {
+      --canvas-width: 1920px;
+      --canvas-height: 1080px;
+      --risk-top: 952px;
+      --risk-height: 47px;
+      --bar-left: 36px;
+      --bar-top: 999px;
+      --bar-width: 1385px;
+      --bar-height: 72px;
+      --label-width: 470px;
+      --zoom: 1;
+      --shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      overflow: hidden;
+      background: transparent;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      transform-origin: top left;
+      transform: scale(var(--zoom));
+    }
+
+    #stage {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    #riskCard {
+      display: none;
+      position: fixed;
+      left: calc(var(--bar-left) + var(--label-width));
+      top: var(--risk-top);
+      width: calc(var(--bar-width) - var(--label-width));
+      height: var(--risk-height);
+      align-items: center;
+      overflow: hidden;
+      padding: 0 15px;
+      box-shadow: var(--shadow);
+      background: #5e5f12;
+    }
+
+    #card {
+      display: none;
+      position: fixed;
+      left: var(--bar-left);
+      top: var(--bar-top);
+      width: var(--bar-width);
+      height: var(--bar-height);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      background: transparent;
+      grid-template-columns: var(--label-width) minmax(0, 1fr);
+    }
+
+    .card-visible {
+      display: grid !important;
+    }
+
+    .risk-visible {
+      display: flex !important;
+    }
+
+    .risk-text {
+      width: 100%;
+      color: inherit;
+      font-size: 15px;
+      font-weight: 900;
+      text-transform: uppercase;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .risk-text,
+    .risk-panel,
+    .locations-panel {
+      text-shadow:
+        -1px -1px 0 rgba(0, 0, 0, 0.72),
+        1px -1px 0 rgba(0, 0, 0, 0.72),
+        -1px 1px 0 rgba(0, 0, 0, 0.72),
+        1px 1px 0 rgba(0, 0, 0, 0.72),
+        0 2px 0 rgba(0, 0, 0, 0.45);
+    }
+
+    .risk-track {
+      display: inline-flex;
+      align-items: center;
+      min-width: max-content;
+      white-space: nowrap;
+      will-change: transform;
+    }
+
+    .risk-track.marquee {
+      animation-name: marquee-scroll;
+      animation-timing-function: linear;
+      animation-iteration-count: 1;
+      animation-fill-mode: both;
+      animation-delay: 0.8s;
+    }
+
+    .risk-copy {
+      flex: 0 0 auto;
+    }
+
+    .risk-gap {
+      display: inline-block;
+      width: 120px;
+      flex: 0 0 auto;
+    }
+
+    .risk-panel {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 18px;
+      font-size: 20px;
+      font-weight: 900;
+      text-transform: uppercase;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-right: 2px solid rgba(255, 255, 255, 0.12);
+      text-align: center;
+    }
+
+    .locations-panel {
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      padding: 0 18px;
+      font-size: 20px;
+      font-weight: 900;
+      text-transform: uppercase;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .locations-track {
+      display: inline-flex;
+      align-items: center;
+      min-width: max-content;
+      white-space: nowrap;
+      will-change: transform;
+    }
+
+    .locations-track.marquee {
+      animation-name: marquee-scroll;
+      animation-timing-function: linear;
+      animation-iteration-count: 1;
+      animation-fill-mode: both;
+      animation-delay: 1s;
+    }
+
+    .locations-copy {
+      flex: 0 0 auto;
+    }
+
+    .locations-gap {
+      display: inline-block;
+      width: 140px;
+      flex: 0 0 auto;
+    }
+
+    #status {
+      display: none;
+      position: fixed;
+      right: 10px;
+      bottom: 8px;
+      max-width: min(600px, calc(100vw - 20px));
+      padding: 7px 9px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.88);
+      color: #15202b;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 1px 8px rgba(0, 0, 0, 0.12);
+      pointer-events: none;
+    }
+
+    #status.visible {
+      display: block;
+    }
+
+    @keyframes marquee-scroll {
+      0% {
+        transform: translateX(0);
+      }
+      100% {
+        transform: translateX(calc(-1 * var(--scroll-distance, 0px)));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <article id="riskCard" aria-live="polite" aria-label="Active warning risk line">
+      <div class="risk-text">
+        <div class="risk-track" id="riskTrack">
+          <span class="risk-copy" id="riskCopy"></span>
+        </div>
+      </div>
+    </article>
+    <article id="card" aria-live="polite" aria-label="Active warning bar">
+      <div class="risk-panel" id="riskPanel"></div>
+      <div class="locations-panel" id="locationsPanel">
+        <div class="locations-track" id="locationsTrack">
+          <span class="locations-copy" id="locationsCopy"></span>
+        </div>
+      </div>
+    </article>
+  </div>
+  <div id="status">Waiting for TuftsWeather Overlays warning summary...</div>
+
+  <script>
+    const LOCAL_OVERLAYS_WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+    const LOCAL_OVERLAYS_SUBSCRIPTIONS = ["summary"];
+    const params = new URLSearchParams(window.location.search);
+
+    const riskCardEl = document.getElementById("riskCard");
+    const riskTrackEl = document.getElementById("riskTrack");
+    const riskCopyEl = document.getElementById("riskCopy");
+    const cardEl = document.getElementById("card");
+    const riskPanelEl = document.getElementById("riskPanel");
+    const locationsPanelEl = document.getElementById("locationsPanel");
+    const locationsTrackEl = document.getElementById("locationsTrack");
+    const locationsCopyEl = document.getElementById("locationsCopy");
+    const statusEl = document.getElementById("status");
+
+    const zoomLevel = Number(params.get("setElementZoomLevel") || "1");
+    const debugStatus = params.get("debug") === "1";
+    const minDisplaySeconds = Math.max(10, Number(params.get("setMinDisplaySeconds") || "10"));
+    const maxDisplaySeconds = Math.max(minDisplaySeconds, Number(params.get("setMaxDisplaySeconds") || "18"));
+
+    document.documentElement.style.setProperty("--zoom", String(zoomLevel));
+    if (debugStatus) {
+      statusEl.classList.add("visible");
+    }
+
+    let socket = null;
+    let reconnectTimer = null;
+    let latestItems = [];
+    let currentIndex = 0;
+    let cycleTimer = null;
+    let latestSignature = "";
+    let currentItemKey = "";
+    let currentHoldUntil = 0;
+    let pendingSummaryRefresh = false;
+
+    function connectLocalOverlays() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      statusEl.textContent = "Connecting to TuftsWeather Overlays warning summary...";
+      socket = new WebSocket(LOCAL_OVERLAYS_WS_URL);
+
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({
+          type: "subscribe",
+          message: LOCAL_OVERLAYS_SUBSCRIPTIONS
+        }));
+      });
+
+      socket.addEventListener("message", (event) => {
+        handleSocketMessage(event.data);
+      });
+
+      socket.addEventListener("close", () => {
+        socket = null;
+        statusEl.textContent = "TuftsWeather Overlays websocket disconnected.";
+        scheduleReconnect();
+      });
+
+      socket.addEventListener("error", () => {
+        statusEl.textContent = "TuftsWeather Overlays websocket unavailable.";
+      });
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer) {
+        return;
+      }
+
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connectLocalOverlays();
+      }, 1000);
+    }
+
+    function handleSocketMessage(raw) {
+      let data;
+
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        return;
+      }
+
+      if (data.type === "subscribe" && data.value === "summary" && data.message) {
+        applySummary(data.message);
+        return;
+      }
+
+      if (data.type === "update" && data.message && typeof data.message === "object" && data.message.summary) {
+        applySummary(data.message.summary);
+      }
+    }
+
+    function applySummary(summary) {
+      const nextItems = Array.isArray(summary?.warningStripItems) ? summary.warningStripItems : [];
+      const nextSignature = nextItems
+        .map((item) => [item?.key, item?.label, item?.locations, item?.riskText].join("|"))
+        .join("||");
+      const changed = nextSignature !== latestSignature;
+      const previousKey = currentItemKey;
+
+      if (!nextItems.length) {
+        if (cycleTimer) {
+          latestItems = [];
+          latestSignature = "";
+          currentItemKey = "";
+          pendingSummaryRefresh = true;
+          return;
+        }
+
+        clearCycleTimer();
+        currentIndex = 0;
+        currentItemKey = "";
+        latestItems = [];
+        latestSignature = "";
+        pendingSummaryRefresh = false;
+        riskCardEl.classList.remove("risk-visible");
+        cardEl.classList.remove("card-visible");
+        statusEl.textContent = "No active warning strip alerts.";
+        return;
+      }
+
+      latestItems = nextItems;
+      latestSignature = nextSignature;
+
+      if (!changed) {
+        if (!cycleTimer) {
+          renderCurrentItem();
+        }
+        return;
+      }
+
+      const matchingIndex = latestItems.findIndex((item) => item?.key === previousKey);
+      if (matchingIndex >= 0) {
+        currentIndex = matchingIndex;
+        if (!cycleTimer) {
+          renderCurrentItem();
+        }
+        return;
+      }
+
+      if (cycleTimer && Date.now() < currentHoldUntil) {
+        pendingSummaryRefresh = true;
+        return;
+      }
+
+      currentIndex = Math.min(currentIndex, latestItems.length - 1);
+      clearCycleTimer();
+      renderCurrentItem();
+    }
+
+    function clearCycleTimer() {
+      if (!cycleTimer) {
+        return;
+      }
+      window.clearTimeout(cycleTimer);
+      cycleTimer = null;
+    }
+
+    function renderCurrentItem() {
+      if (!latestItems.length) {
+        return;
+      }
+
+      const item = latestItems[currentIndex % latestItems.length];
+      const baseColor = getBaseColor(item);
+      currentItemKey = item?.key || "";
+      riskCardEl.classList.add("risk-visible");
+      cardEl.classList.add("card-visible");
+      cardEl.style.background = baseColor;
+      riskCardEl.style.background = baseColor;
+      riskCardEl.style.color = "#ffffff";
+      riskPanelEl.style.background = darkenColor(baseColor, 0.14);
+      riskPanelEl.style.color = "#ffffff";
+      locationsPanelEl.style.background = "transparent";
+      locationsPanelEl.style.color = "#ffffff";
+      const resolvedRiskText = resolveRiskText(item);
+      riskPanelEl.textContent = resolveDisplayLabel(item, resolvedRiskText);
+      riskCopyEl.textContent = resolvedRiskText;
+      locationsCopyEl.textContent = resolveLocationsText(item);
+      fitTextToBox(riskPanelEl, 15, 20);
+      resetRiskMarquee();
+      resetMarquee();
+
+      const riskHoldSeconds = applyRiskMarqueeIfNeeded();
+      const locationHoldSeconds = applyMarqueeIfNeeded();
+      const holdSeconds = Math.min(maxDisplaySeconds, Math.max(minDisplaySeconds, riskHoldSeconds, locationHoldSeconds));
+      currentHoldUntil = Date.now() + (holdSeconds * 1000);
+      statusEl.textContent = `${latestItems.length} active warning(s). Showing ${currentIndex + 1} of ${latestItems.length}.`;
+      scheduleNext(holdSeconds);
+    }
+
+    function finishPendingSummaryRefresh() {
+      pendingSummaryRefresh = false;
+
+      if (!latestItems.length) {
+        currentIndex = 0;
+        currentItemKey = "";
+        currentHoldUntil = 0;
+        riskCardEl.classList.remove("risk-visible");
+        cardEl.classList.remove("card-visible");
+        statusEl.textContent = "No active warning strip alerts.";
+        return true;
+      }
+
+      currentIndex = Math.min(currentIndex, latestItems.length - 1);
+      renderCurrentItem();
+      return true;
+    }
+
+    function formatRiskLabel(label) {
+      return String(label || "WARNING")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+        .toUpperCase();
+    }
+
+    function resolveDisplayLabel(item, resolvedRiskText = "") {
+      const label = formatRiskLabel(item?.label || "WARNING");
+      const riskText = String(resolvedRiskText || item?.riskText || "").toUpperCase();
+
+      if (label.includes("SEVERE THUNDERSTORM WARNING")) {
+        if (riskText.includes("EDS SEVERE THUNDERSTORM WARNING") || riskText.includes("EMERGENCY DAMAGE THREAT")) {
+          return "EDS - SEVERE THUNDERSTORM WARNING";
+        }
+        if (riskText.includes("DESTRUCTIVE SEVERE THUNDERSTORM WARNING") || riskText.includes("DESTRUCTIVE DAMAGE THREAT")) {
+          return "DESTRUCTIVE - SEVERE THUNDERSTORM WARNING";
+        }
+        if (riskText.includes("CONSIDERABLE SEVERE THUNDERSTORM WARNING") || riskText.includes("CONSIDERABLE DAMAGE THREAT")) {
+          return "CONSIDERABLE - SEVERE THUNDERSTORM WARNING";
+        }
+      }
+
+      if (label === "TORNADO WARNING") {
+        if (riskText.includes("CATASTROPHIC DAMAGE THREAT")) {
+          return "TORNADO EMERGENCY";
+        }
+        if (riskText.includes("OBSERVED TORNADO")) {
+          return "OBSERVED - TORNADO WARNING";
+        }
+      }
+
+      if (label === "FLASH FLOOD WARNING" && riskText.includes("CONSIDERABLE")) {
+        return "CONSIDERABLE - FLASH FLOOD WARNING";
+      }
+
+      return label;
+    }
+
+    function darkenColor(color, amount) {
+      const value = String(color || "").replace("#", "");
+      if (!/^[0-9a-fA-F]{6}$/.test(value)) {
+        return color;
+      }
+
+      const factor = Math.max(0, 1 - amount);
+      const parts = [0, 2, 4].map((offset) => {
+        const channel = Number.parseInt(value.slice(offset, offset + 2), 16);
+        const next = Math.max(0, Math.min(255, Math.round(channel * factor)));
+        return next.toString(16).padStart(2, "0");
+      });
+
+      return `#${parts.join("")}`;
+    }
+
+    function getBaseColor(item) {
+      const color = item?.color || "#d10000";
+      const label = formatRiskLabel(item?.label || item?.event || "");
+      const adjustedColor = label.includes("SEVERE THUNDERSTORM WARNING") ? darkenColor(color, 0.12) : color;
+      return darkenColor(adjustedColor, 0.1);
+    }
+
+    function fitTextToBox(element, minFontSize, maxFontSize = null) {
+      if (!element) {
+        return;
+      }
+
+      element.style.fontSize = maxFontSize ? `${maxFontSize}px` : "";
+      let fontSize = Number.parseFloat(window.getComputedStyle(element).fontSize);
+      while (
+        (element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight) &&
+        fontSize > minFontSize
+      ) {
+        fontSize -= 1;
+        element.style.fontSize = `${fontSize}px`;
+      }
+    }
+
+    function resolveRiskText(item) {
+      const text = String(item?.riskText || "").trim().toUpperCase();
+      if (text && !text.includes("STAY ALERT FOR RAPIDLY CHANGING WEATHER CONDITIONS")) {
+        return text;
+      }
+
+      const label = formatRiskLabel(item?.label || "");
+      if (label.includes("TORNADO")) {
+        if (label.includes("WATCH")) {
+          return "TORNADOES POSSIBLE. DAMAGING WINDS POSSIBLE. LARGE HAIL POSSIBLE.";
+        }
+        return "TORNADO POSSIBLE. TREES AND ROOFS COULD SEE DAMAGE. HAIL DAMAGE TO VEHICLES IS POSSIBLE.";
+      }
+
+      if (label.includes("SEVERE THUNDERSTORM")) {
+        if (label.includes("WATCH")) {
+          return "SEVERE THUNDERSTORMS POSSIBLE. DAMAGING WINDS POSSIBLE. LARGE HAIL POSSIBLE.";
+        }
+        if (label.includes("DESTRUCTIVE")) {
+          return "TREES AND ROOFS COULD SEE DAMAGE. HAIL DAMAGE TO VEHICLES IS POSSIBLE. DESTRUCTIVE SEVERE THUNDERSTORM WARNING.";
+        }
+        if (label.includes("CONSIDERABLE")) {
+          return "TREES AND ROOFS COULD SEE DAMAGE. HAIL DAMAGE TO VEHICLES IS POSSIBLE. CONSIDERABLE SEVERE THUNDERSTORM WARNING.";
+        }
+        return "TREES AND ROOFS COULD SEE DAMAGE. HAIL DAMAGE TO VEHICLES IS POSSIBLE.";
+      }
+
+      if (label.includes("FLASH FLOOD")) {
+        return "FLASH FLOODING IS POSSIBLE. LOW-WATER CROSSINGS COULD FLOOD. TURN AROUND, DON'T DROWN.";
+      }
+
+      return "SEVERE WEATHER RISK DETAILS AVAILABLE.";
+    }
+
+    function resolveLocationsText(item) {
+      const raw = String(item?.locations || "").trim().toUpperCase();
+      if (!raw) {
+        return "LOCATION DETAILS PENDING";
+      }
+
+      const label = formatRiskLabel(item?.label || "");
+      if (!label.includes("WATCH")) {
+        return raw;
+      }
+
+      const stateSet = new Set();
+      const matches = raw.match(/(?:^|[-,;]\s*)([A-Z]{2})(?=$|\s*[-,;])/g) || [];
+      for (const token of matches) {
+        const state = token.replace(/[-,;]/g, "").trim();
+        if (/^[A-Z]{2}$/.test(state)) {
+          stateSet.add(state);
+        }
+      }
+
+      if (stateSet.size) {
+        return Array.from(stateSet).join(" - ");
+      }
+
+      return raw;
+    }
+
+    function resetMarquee() {
+      locationsTrackEl.classList.remove("marquee");
+      locationsTrackEl.style.removeProperty("--scroll-distance");
+      locationsTrackEl.style.removeProperty("animation-duration");
+
+      const gap = locationsTrackEl.querySelector(".locations-gap");
+      if (gap) {
+        gap.remove();
+      }
+
+      const clone = locationsTrackEl.querySelector('[data-clone="true"]');
+      if (clone) {
+        clone.remove();
+      }
+    }
+
+    function resetRiskMarquee() {
+      riskTrackEl.classList.remove("marquee");
+      riskTrackEl.style.removeProperty("--scroll-distance");
+      riskTrackEl.style.removeProperty("animation-duration");
+
+      const gap = riskTrackEl.querySelector(".risk-gap");
+      if (gap) {
+        gap.remove();
+      }
+
+      const clone = riskTrackEl.querySelector('[data-clone="true"]');
+      if (clone) {
+        clone.remove();
+      }
+    }
+
+    function applyRiskMarqueeIfNeeded() {
+      fitTextToBox(riskCopyEl, 12, 15);
+      const overflow = riskCopyEl.scrollWidth - riskCardEl.clientWidth + 28;
+      if (overflow <= 16) {
+        return minDisplaySeconds;
+      }
+
+      const gapEl = document.createElement("span");
+      gapEl.className = "risk-gap";
+      gapEl.setAttribute("aria-hidden", "true");
+
+      const cloneEl = riskCopyEl.cloneNode(true);
+      cloneEl.dataset.clone = "true";
+      cloneEl.setAttribute("aria-hidden", "true");
+
+      riskTrackEl.append(gapEl, cloneEl);
+      const scrollDistance = riskCopyEl.scrollWidth + gapEl.offsetWidth;
+      const pixelsPerSecond = 42;
+      const duration = Math.max(minDisplaySeconds, (scrollDistance / pixelsPerSecond) + 1.25);
+      riskTrackEl.style.setProperty("--scroll-distance", `${scrollDistance}px`);
+      riskTrackEl.style.animationDuration = `${duration}s`;
+      riskTrackEl.classList.add("marquee");
+      return duration + 0.6;
+    }
+
+    function applyMarqueeIfNeeded() {
+      const overflow = locationsCopyEl.scrollWidth - locationsPanelEl.clientWidth;
+      if (overflow <= 16) {
+        return minDisplaySeconds;
+      }
+
+      const gapEl = document.createElement("span");
+      gapEl.className = "locations-gap";
+      gapEl.setAttribute("aria-hidden", "true");
+
+      const cloneEl = locationsCopyEl.cloneNode(true);
+      cloneEl.dataset.clone = "true";
+      cloneEl.setAttribute("aria-hidden", "true");
+
+      locationsTrackEl.append(gapEl, cloneEl);
+      const scrollDistance = locationsCopyEl.scrollWidth + gapEl.offsetWidth;
+      const pixelsPerSecond = 36;
+      const duration = Math.max(minDisplaySeconds, (scrollDistance / pixelsPerSecond) + 1.5);
+      locationsTrackEl.style.setProperty("--scroll-distance", `${scrollDistance}px`);
+      locationsTrackEl.style.animationDuration = `${duration}s`;
+      locationsTrackEl.classList.add("marquee");
+      return duration + 0.8;
+    }
+
+    function scheduleNext(holdSeconds) {
+      clearCycleTimer();
+      cycleTimer = window.setTimeout(() => {
+        cycleTimer = null;
+
+        if (pendingSummaryRefresh) {
+          finishPendingSummaryRefresh();
+          return;
+        }
+
+        if (!latestItems.length) {
+          return;
+        }
+        currentIndex = (currentIndex + 1) % latestItems.length;
+        renderCurrentItem();
+      }, holdSeconds * 1000);
+    }
+
+    connectLocalOverlays();
+    window.addEventListener("resize", () => {
+      if (!latestItems.length || cycleTimer) {
+        return;
+      }
+      renderCurrentItem();
+    });
+  </script>
+</body>
+</html>

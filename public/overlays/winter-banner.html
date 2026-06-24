@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Winter Warning Banner</title>
+  <style>
+    :root {
+      --banner-width: 1920px;
+      --banner-height: 1080px;
+      --clock-reserved-width: 380px;
+      --no-warning-blue: #006fd6;
+      --banner-main: #2f7dff;
+      --banner-title: #1f5ccc;
+      --banner-border: #111111;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: var(--banner-width);
+      min-height: var(--banner-height);
+      overflow: hidden;
+      background: transparent;
+      color: #fff;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    #banner {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: var(--banner-width);
+      height: 131px;
+      background: var(--banner-main);
+      border-top: 6px solid var(--banner-border);
+      border-bottom: 4px solid var(--banner-border);
+      overflow: hidden;
+      z-index: 3;
+    }
+
+    #title {
+      position: absolute;
+      left: 0;
+      top: -6px;
+      width: 1040px;
+      height: 142px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 28px;
+      background: var(--banner-title);
+      color: #fff;
+      font-size: 44px;
+      font-weight: 950;
+      line-height: 1;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow:
+        -1px -1px 0 rgba(0,0,0,0.76),
+        1px -1px 0 rgba(0,0,0,0.76),
+        -1px 1px 0 rgba(0,0,0,0.76),
+        1px 1px 0 rgba(0,0,0,0.76),
+        0 3px 0 rgba(0,0,0,0.42);
+    }
+
+    .time-separator {
+      position: absolute;
+      top: 0;
+      left: 1040px;
+      width: 7px;
+      height: 131px;
+      background: #fff;
+      box-shadow: 0 2px 0 rgba(0,0,0,0.45);
+    }
+
+    #noWarnings {
+      display: block;
+      width: var(--banner-width);
+      height: 131px;
+      overflow: hidden;
+    }
+
+    .no-warning-strip {
+      width: var(--banner-width);
+      height: 131px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 0 var(--clock-reserved-width) 0 28px;
+      background: var(--no-warning-blue);
+      color: #fff;
+      font-weight: 900;
+      text-transform: uppercase;
+      overflow: hidden;
+    }
+
+    .no-warning-text {
+      display: block;
+      max-width: 100%;
+      font-size: clamp(30px, 5.1vw, 54px);
+      line-height: 1.05;
+      white-space: nowrap;
+      transform-origin: left center;
+    }
+
+    #time {
+      position: fixed;
+      top: 65px;
+      right: 58px;
+      transform: translateY(-50%);
+      z-index: 6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 455px;
+      font-size: 47px;
+      font-weight: 950;
+      color: #fff;
+      text-align: center;
+      line-height: 1;
+      white-space: nowrap;
+      text-shadow:
+        -1px -1px 0 rgba(0,0,0,0.78),
+        1px -1px 0 rgba(0,0,0,0.78),
+        -1px 1px 0 rgba(0,0,0,0.78),
+        1px 1px 0 rgba(0,0,0,0.78),
+        0 3px 0 rgba(0,0,0,0.44);
+    }
+
+    body.no-warning-active #time {
+      top: 65px;
+      right: calc((var(--clock-reserved-width) - 310px) / 2);
+      width: 310px;
+      font-size: 38px;
+      padding: 12px;
+      background: rgba(0,0,0,0.72);
+      border-radius: 5px;
+    }
+
+    #status {
+      display: none;
+      position: fixed;
+      right: 10px;
+      bottom: 8px;
+      max-width: min(520px, calc(100vw - 20px));
+      padding: 7px 9px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.88);
+      color: #15202b;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    #status.visible { display: block; }
+  </style>
+</head>
+<body class="no-warning-active">
+  <section id="banner" aria-label="Highest active winter warning banner">
+    <div id="title">No Winter Alerts</div>
+    <div class="time-separator"></div>
+  </section>
+  <section id="noWarnings" aria-label="No winter alerts active currently">
+    <div class="no-warning-strip">
+      <div class="no-warning-text" id="noWarningText">No winter alerts active currently</div>
+    </div>
+  </section>
+  <div id="time"></div>
+  <div id="status">Checking winter alerts...</div>
+
+  <script>
+    const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+    const params = new URLSearchParams(window.location.search);
+    const debug = params.get("debug") === "1";
+    const titleEl = document.getElementById("title");
+    const bannerEl = document.getElementById("banner");
+    const noWarningsEl = document.getElementById("noWarnings");
+    const noWarningTextEl = document.getElementById("noWarningText");
+    const timeEl = document.getElementById("time");
+    const statusEl = document.getElementById("status");
+    let socket = null;
+    let reconnectTimer = null;
+
+    if (debug) statusEl.classList.add("visible");
+
+    const timeZones = [
+      { label: "ET", timeZone: "America/New_York" },
+      { label: "CT", timeZone: "America/Chicago" },
+      { label: "MT", timeZone: "America/Denver" },
+      { label: "PT", timeZone: "America/Los_Angeles" }
+    ];
+    let timeZoneIndex = 0;
+
+    function updateTime() {
+      const zone = timeZones[timeZoneIndex];
+      timeEl.textContent = `${new Date().toLocaleTimeString("en-US", {
+        timeZone: zone.timeZone,
+        hour12: true,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      })} ${zone.label}`;
+    }
+
+    function rotateTimeZone() {
+      timeZoneIndex = (timeZoneIndex + 1) % timeZones.length;
+      updateTime();
+    }
+
+    function darkenColor(color, amount) {
+      const value = String(color || "").replace("#", "");
+      if (!/^[0-9a-fA-F]{6}$/.test(value)) return color;
+      const factor = Math.max(0, 1 - amount);
+      return "#" + [0, 2, 4].map((offset) => {
+        const channel = Number.parseInt(value.slice(offset, offset + 2), 16);
+        return Math.max(0, Math.min(255, Math.round(channel * factor))).toString(16).padStart(2, "0");
+      }).join("");
+    }
+
+    function fitText(el, minSize, maxSize) {
+      el.style.fontSize = `${maxSize}px`;
+      let size = maxSize;
+      while ((el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) && size > minSize) {
+        size -= 1;
+        el.style.fontSize = `${size}px`;
+      }
+    }
+
+    function fitNoWarningText() {
+      noWarningTextEl.style.transform = "scaleX(1)";
+      const available = noWarningTextEl.parentElement.clientWidth;
+      if (noWarningTextEl.scrollWidth > available && noWarningTextEl.scrollWidth > 0) {
+        noWarningTextEl.style.transform = `scaleX(${Math.max(0.58, available / noWarningTextEl.scrollWidth)})`;
+      }
+    }
+
+    function renderSummary(summary, errorMessage = "") {
+      const key = String(summary?.winterHighestKey || "");
+      const label = String(summary?.winterHighestLabel || "No winter alerts active currently").trim().toUpperCase();
+      const color = String(summary?.winterHighestColor || summary?.winterHighestFill || "#006fd6");
+
+      if (!key) {
+        document.body.classList.add("no-warning-active");
+        bannerEl.style.display = "none";
+        noWarningsEl.style.display = "block";
+        fitNoWarningText();
+        statusEl.textContent = errorMessage || "No winter alerts active currently.";
+        return;
+      }
+
+      document.body.classList.remove("no-warning-active");
+      document.documentElement.style.setProperty("--banner-main", color);
+      document.documentElement.style.setProperty("--banner-title", darkenColor(color, 0.22));
+      titleEl.textContent = label;
+      noWarningsEl.style.display = "none";
+      bannerEl.style.display = "block";
+      fitText(titleEl, 22, 44);
+      statusEl.textContent = `${label} is the highest active winter alert.`;
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/api/status", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        renderSummary(payload?.summary || {});
+      } catch (_) {}
+    }
+
+    function handleSocketMessage(raw) {
+      try {
+        const data = JSON.parse(raw);
+        if (data.type === "subscribe" && data.value === "summary") {
+          renderSummary(data.message || {});
+        } else if (data.type === "update" && data.message?.summary) {
+          renderSummary(data.message.summary || {});
+        }
+      } catch (_) {}
+    }
+
+    function connect() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+      socket = new WebSocket(WS_URL);
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({ type: "subscribe", message: ["summary"] }));
+        refresh();
+      });
+      socket.addEventListener("message", (event) => handleSocketMessage(event.data));
+      socket.addEventListener("close", () => {
+        socket = null;
+        if (!reconnectTimer) {
+          reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, 1000);
+        }
+      });
+      socket.addEventListener("error", () => socket && socket.close());
+    }
+
+    updateTime();
+    refresh();
+    connect();
+    window.setInterval(updateTime, 1000);
+    window.setInterval(rotateTimeZone, 10000);
+    window.addEventListener("resize", () => {
+      if (bannerEl.style.display === "block") fitText(titleEl, 22, 44);
+      else fitNoWarningText();
+    });
+  </script>
+</body>
+</html>

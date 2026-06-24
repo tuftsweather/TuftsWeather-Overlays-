@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TuftsWeather Overlays Warned Cameras</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest" defer></script>
+  <style>
+    :root {
+      --overlay-top: 22px;
+      --overlay-width: min(84vw, 1120px);
+      --overlay-primary: #c80f11;
+      --overlay-secondary: #8f0b0d;
+      --overlay-radius: 14px;
+      --overlay-border: rgba(255, 255, 255, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #fff;
+    }
+
+    .root {
+      position: fixed;
+      inset: 0;
+      background: #000;
+    }
+
+    #video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+      opacity: 0;
+      transition: opacity 0.45s ease;
+    }
+
+    .top-pill {
+      position: absolute;
+      top: var(--overlay-top);
+      left: 50%;
+      transform: translateX(-50%);
+      width: var(--overlay-width);
+      max-width: calc(100vw - 32px);
+      min-height: 62px;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--overlay-radius);
+      border: 2px solid var(--overlay-border);
+      background: linear-gradient(135deg, var(--overlay-primary), var(--overlay-secondary));
+      box-shadow: 0 16px 46px rgba(0, 0, 0, 0.42);
+      z-index: 5;
+      text-align: center;
+    }
+
+    .top-pill.hidden,
+    .status.hidden {
+      display: none !important;
+    }
+
+    .top-pill__content {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      width: 100%;
+    }
+
+    .top-pill__warning {
+      font-size: clamp(18px, 2.4vw, 38px);
+      font-weight: 900;
+      text-transform: uppercase;
+      line-height: 1;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+    }
+
+    .top-pill__divider {
+      font-size: clamp(16px, 1.6vw, 28px);
+      font-weight: 700;
+      opacity: 0.82;
+    }
+
+    .top-pill__location {
+      font-size: clamp(17px, 2.1vw, 34px);
+      font-weight: 900;
+      line-height: 1.05;
+      text-transform: uppercase;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+    }
+
+    .status {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 4;
+      pointer-events: none;
+    }
+
+    .status__box {
+      max-width: min(72vw, 920px);
+      padding: 14px 20px;
+      border-radius: var(--overlay-radius);
+      background: rgba(14, 14, 18, 0.84);
+      border: 2px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.44);
+      font-size: clamp(18px, 2.4vw, 34px);
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .watermark {
+      position: absolute;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      max-width: calc(100vw - 16px);
+      color: rgba(255, 255, 255, 0.4);
+      font-size: clamp(10px, 0.95vw, 18px);
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      z-index: 5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="top-pill hidden" id="topPill">
+      <div class="top-pill__content">
+        <span class="top-pill__warning" id="warningText">Tornado Warning</span>
+        <span class="top-pill__divider">|</span>
+        <span class="top-pill__location" id="locationText">Dexter, MO</span>
+      </div>
+    </div>
+    <div class="status" id="status">
+      <div class="status__box" id="statusText">Checking for cameras inside active warnings...</div>
+    </div>
+    <div class="watermark">NOT FOR BROADCAST - REQUIRES PERMISSION FROM OWNER</div>
+  </div>
+
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      const params = new URLSearchParams(window.location.search);
+      const elements = {
+        video: document.getElementById("video"),
+        topPill: document.getElementById("topPill"),
+        warningText: document.getElementById("warningText"),
+        locationText: document.getElementById("locationText"),
+        status: document.getElementById("status"),
+        statusText: document.getElementById("statusText"),
+      };
+
+      const settings = {
+        refreshTime: Math.max(5, Number(params.get("setRefreshTime") || "15")),
+        rotationTime: Math.max(5, Number(params.get("setRotationTime") || "20")),
+        matchesUrl: params.get("setMatchesUrl") || "/api/warned-cameras",
+        cameraDataUrl: params.get("setCameraDataUrl") || "/api/cameras-lite",
+        fallbackCameraDataUrl: params.get("setFallbackCameraDataUrl") || "/api/cameras?v=21",
+        search: params.get("setSearch") || "",
+        streamSource: (params.get("setStreamSource") || "*").toLowerCase(),
+        warningPattern: new RegExp(params.get("setWarningPattern") || "WARNING", "i"),
+        streamMuted: (params.get("setStreamMuted") || "true") !== "false",
+        streamBufferDelay: Math.max(1, Number(params.get("setStreamBufferDelay") || "2")),
+        fallbackRadiusMiles: Math.max(5, Number(params.get("setFallbackRadiusMiles") || "18")),
+        cameraFetchTimeoutMs: Math.max(1500, Number(params.get("setCameraFetchTimeoutMs") || "4500")),
+      };
+
+      const rankOrder = [
+        "TORNADO EMERGENCY",
+        "PDS - TORNADO WARNING",
+        "OBSERVED - TORNADO WARNING",
+        "TORNADO WARNING",
+        "EDS - SEVERE THUNDERSTORM WARNING",
+        "CONSIDERABLE - SEVERE THUNDERSTORM WARNING",
+        "SEVERE THUNDERSTORM WARNING",
+        "FLASH FLOOD EMERGENCY",
+        "CONSIDERABLE - FLASH FLOOD WARNING",
+        "FLASH FLOOD WARNING",
+        "TORNADO WATCH",
+        "SEVERE THUNDERSTORM WATCH",
+      ];
+
+      const state = {
+        cameras: [],
+        matches: [],
+        currentIndex: -1,
+        currentStreamUrl: "",
+        currentEventsSignature: "",
+        failedStreamUrls: new Set(),
+        rotationTimer: null,
+        refreshTimer: null,
+        connectTimeout: null,
+        hls: null,
+      };
+
+      function normalize(value) {
+        return String(value || "").toUpperCase().replace(/\s+/g, " ").trim();
+      }
+
+      function classifyAlert(feature) {
+        const properties = feature?.properties ?? {};
+        const details = properties?.details ?? {};
+        const event = normalize(properties.event || details.native);
+        const name = normalize(details.name || properties.properEventName || properties.event);
+        const headline = normalize(properties.headline);
+        const description = normalize(details.description || properties.description);
+        const instruction = normalize(properties.instruction);
+        const combinedText = `${name} ${event} ${headline} ${description} ${instruction}`;
+        const paramsText = normalize(
+          Object.entries(properties.parameters || {})
+            .map(([key, value]) => `${key} ${Array.isArray(value) ? value.join(" ") : value}`)
+            .join(" "),
+        );
+
+        if (combinedText.includes("TORNADO EMERGENCY") || paramsText.includes("CATASTROPHIC")) {
+          return { label: "TORNADO EMERGENCY", primary: "#c2185b", secondary: "#8a0f40" };
+        }
+        if (name.includes("PDS TORNADO WARNING") || (combinedText.includes("PARTICULARLY DANGEROUS SITUATION") && event === "TORNADO WARNING")) {
+          return { label: "PDS - TORNADO WARNING", primary: "#7c3aed", secondary: "#5c28b1" };
+        }
+        if (name.includes("CONFIRMED TORNADO WARNING") || name.includes("TORNADO OBSERVED")) {
+          return { label: "OBSERVED - TORNADO WARNING", primary: "#a40000", secondary: "#760000" };
+        }
+        if (name.includes("RADAR INDICATED TORNADO WARNING") || event === "TORNADO WARNING") {
+          return { label: "TORNADO WARNING", primary: "#d10000", secondary: "#930000" };
+        }
+        if (name.includes("TORNADO WATCH") || event === "TORNADO WATCH") {
+          return { label: "TORNADO WATCH", primary: "#cf1b1b", secondary: "#8d1212" };
+        }
+        if (name.includes("SEVERE THUNDERSTORM WATCH") || event === "SEVERE THUNDERSTORM WATCH") {
+          return { label: "SEVERE THUNDERSTORM WATCH", primary: "#e47b8f", secondary: "#af5366" };
+        }
+        if (
+          name.includes("DESTRUCTIVE SEVERE THUNDERSTORM WARNING") ||
+          combinedText.includes("DESTRUCTIVE SEVERE THUNDERSTORM WARNING") ||
+          paramsText.includes("DAMAGE_THREAT DESTRUCTIVE") ||
+          paramsText.includes("THUNDERSTORMDAMAGETHREAT DESTRUCTIVE")
+        ) {
+          return { label: "EDS - SEVERE THUNDERSTORM WARNING", primary: "#b66a00", secondary: "#7f4b00" };
+        }
+        if (
+          name.includes("CONSIDERABLE SEVERE THUNDERSTORM WARNING") ||
+          combinedText.includes("CONSIDERABLE SEVERE THUNDERSTORM WARNING") ||
+          paramsText.includes("DAMAGE_THREAT CONSIDERABLE") ||
+          paramsText.includes("THUNDERSTORMDAMAGETHREAT CONSIDERABLE")
+        ) {
+          return { label: "CONSIDERABLE - SEVERE THUNDERSTORM WARNING", primary: "#c79a00", secondary: "#896900" };
+        }
+        if (name.includes("SEVERE THUNDERSTORM WARNING") || event === "SEVERE THUNDERSTORM WARNING") {
+          return { label: "SEVERE THUNDERSTORM WARNING", primary: "#b98a00", secondary: "#7d5e00" };
+        }
+        if (name.includes("FLASH FLOOD EMERGENCY") || combinedText.includes("FLASH FLOOD EMERGENCY")) {
+          return { label: "FLASH FLOOD EMERGENCY", primary: "#0b3d1b", secondary: "#062711" };
+        }
+        if (
+          name.includes("CONSIDERABLE FLASH FLOOD WARNING") ||
+          combinedText.includes("CONSIDERABLE FLASH FLOOD WARNING") ||
+          paramsText.includes("DAMAGE_THREAT CONSIDERABLE")
+        ) {
+          return { label: "CONSIDERABLE - FLASH FLOOD WARNING", primary: "#13662f", secondary: "#0c451f" };
+        }
+        if (name.includes("FLASH FLOOD WARNING") || event === "FLASH FLOOD WARNING") {
+          return { label: "FLASH FLOOD WARNING", primary: "#1f8a43", secondary: "#14622f" };
+        }
+
+        return { label: properties.event || "ACTIVE WARNING", primary: "#cc8400", secondary: "#a06000" };
+      }
+
+      function rankEvent(label) {
+        const normalized = normalize(label);
+        const index = rankOrder.findIndex((entry) => normalized.includes(entry));
+        return index === -1 ? rankOrder.length + 1 : index;
+      }
+
+      function eventIsActiveWarning(feature) {
+        const properties = feature?.properties ?? {};
+        const event = String(properties.event || "").trim();
+        const action = normalize(properties.action_type || properties.messageType);
+        const expiresAt = Date.parse(String(properties.expires || ""));
+        if (!event || action === "EXPIRED" || action === "CANCELLED" || action === "CANCELED") {
+          return false;
+        }
+        if (!settings.warningPattern.test(event)) {
+          return false;
+        }
+        if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+          return false;
+        }
+        return true;
+      }
+
+      function decodePolygons(encoded) {
+        if (!encoded) return [];
+        try {
+          return JSON.parse(atob(String(encoded)));
+        } catch {
+          return [];
+        }
+      }
+
+      function normalizePolygonSet(input) {
+        if (!Array.isArray(input) || !input.length) {
+          return [];
+        }
+
+        if (
+          Array.isArray(input[0])
+          && Array.isArray(input[0][0])
+          && typeof input[0][0][0] === "number"
+        ) {
+          return [input[0]];
+        }
+
+        if (
+          Array.isArray(input[0])
+          && Array.isArray(input[0][0])
+          && Array.isArray(input[0][0][0])
+        ) {
+          return input
+            .map((polygon) => {
+              if (!Array.isArray(polygon)) return null;
+              if (Array.isArray(polygon[0]) && Array.isArray(polygon[0][0])) {
+                return polygon[0];
+              }
+              return polygon;
+            })
+            .filter((polygon) => Array.isArray(polygon) && polygon.length >= 3);
+        }
+
+        return [];
+      }
+
+      function getEventPolygonSet(feature) {
+        const geometry = feature?.geometry ?? {};
+        if (geometry.type === "Polygon") {
+          return normalizePolygonSet(geometry.coordinates);
+        }
+        if (geometry.type === "MultiPolygon") {
+          return normalizePolygonSet(geometry.coordinates);
+        }
+
+        const rawGeometry = feature?.properties?.raw?.geometry ?? {};
+        if (rawGeometry.type === "Polygon") {
+          return normalizePolygonSet(rawGeometry.coordinates);
+        }
+        if (rawGeometry.type === "MultiPolygon") {
+          return normalizePolygonSet(rawGeometry.coordinates);
+        }
+
+        return normalizePolygonSet(decodePolygons(feature?.properties?.geocode?.generated));
+      }
+
+      function getPolygonBounds(polygonSet) {
+        let minLon = Infinity;
+        let minLat = Infinity;
+        let maxLon = -Infinity;
+        let maxLat = -Infinity;
+
+        for (const ring of polygonSet) {
+          for (const point of ring) {
+            const lon = Number(point?.[0]);
+            const lat = Number(point?.[1]);
+            if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+            minLon = Math.min(minLon, lon);
+            minLat = Math.min(minLat, lat);
+            maxLon = Math.max(maxLon, lon);
+            maxLat = Math.max(maxLat, lat);
+          }
+        }
+
+        if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
+          return null;
+        }
+
+        return { minLon, minLat, maxLon, maxLat };
+      }
+
+      function haversineMiles(lat1, lon1, lat2, lon2) {
+        const toRadians = (value) => (value * Math.PI) / 180;
+        const earthRadiusMiles = 3958.8;
+        const dLat = toRadians(lat2 - lat1);
+        const dLon = toRadians(lon2 - lon1);
+        const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
+        return 2 * earthRadiusMiles * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+
+      function pointInRing(lon, lat, ring) {
+        let inside = false;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const xi = Number(ring[i][0]);
+          const yi = Number(ring[i][1]);
+          const xj = Number(ring[j][0]);
+          const yj = Number(ring[j][1]);
+          const intersect = ((yi > lat) !== (yj > lat))
+            && (lon < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+
+      function pointInPolygonSet(lon, lat, polygonSet) {
+        if (!Array.isArray(polygonSet)) return false;
+        for (const polygon of polygonSet) {
+          if (!Array.isArray(polygon) || !Array.isArray(polygon[0])) continue;
+          if (pointInRing(lon, lat, polygon)) return true;
+        }
+        return false;
+      }
+
+      function firstValue(values) {
+        for (const value of values) {
+          if (typeof value === "string" && value.trim()) return value.trim();
+          if (value !== null && value !== undefined && typeof value !== "object") return String(value).trim();
+        }
+        return "";
+      }
+
+      function firstUrl(values) {
+        function pick(value) {
+          if (!value) return "";
+          if (typeof value === "string") return value.trim();
+          if (typeof value !== "object") return String(value).trim();
+          const candidates = [
+            value.url, value.hls, value.hlsUrl, value.m3u8, value.m3u8Url, value.m3u8_url,
+            value.videoUrl, value.video_url, value.stream_url, value.streamUrl, value.playbackUrl, value.src,
+          ];
+          for (const candidate of candidates) {
+            if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+          }
+          return "";
+        }
+
+        return values.map(pick).find(Boolean) || "";
+      }
+
+      function isLikelyVideo(url) {
+        const value = String(url || "").toLowerCase();
+        return value.includes(".m3u8") || value.includes("/playlist") || value.includes("/manifest");
+      }
+
+      function cameraState(props) {
+        const direct = String(props.state || props._state || "").trim().toUpperCase();
+        if (/^[A-Z]{2,}$/.test(direct)) {
+          return direct;
+        }
+
+        const rawId = String(props.cameraId || props.camera_id || props.id || "").trim();
+        const prefixMatch = rawId.match(/^([A-Z]{2,}):/i);
+        if (prefixMatch) {
+          return prefixMatch[1].toUpperCase();
+        }
+
+        const source = String(props.source || "").trim().toUpperCase();
+        if (source === "CHASERS" || source === "LIVE-CHASERS") return "CHASERS";
+        if (source === "HAZCAMS") return "HAZCAMS";
+        if (source === "CYCLONEPORT") return "CYCLONEPORT";
+        return "";
+      }
+
+      function normalizeCamera(feature) {
+        const props = feature?.properties ?? {};
+        const [lon, lat] = feature?.geometry?.coordinates ?? [];
+        if (!Number.isFinite(Number(lon)) || !Number.isFinite(Number(lat))) {
+          return null;
+        }
+
+        const sourceName = String(firstValue([props.source, props.provider, props.sourceType, ""]) || "").trim().toLowerCase();
+        const derivedState = cameraState(props);
+        if (sourceName.includes("chaser") || derivedState === "CHASERS") {
+          return null;
+        }
+
+        const streamUrl = firstUrl([
+          props.hls_url, props.streamingURL, props.streamingVideoURL, props.m3u8Url,
+          props.m3u8_url, props.m3u8, props.url2, props.URL2, props.hls_stream_protected,
+          props.streamSrc, props.httpsVideoUrl, props.httpVideoUrl, props.https_url,
+          props.ios_url, props.stream_url, props.video_url, props.videoUrl, props.url,
+        ]);
+
+        if (!isLikelyVideo(streamUrl)) {
+          return null;
+        }
+
+        return {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [Number(lon), Number(lat)] },
+          properties: {
+            cameraId: firstValue([props._mapKey, props.cameraId, props.camera_id, props.id, feature.id, streamUrl]),
+            name: firstValue([props.cameraName, props.camera_title, props.name, props.title, props.description]) || "Traffic Camera",
+            location: firstValue([props.location, props.city, props.county, props.state, props.directionLabel, props.source, "TRAFFIC CAMERA"]),
+            source: firstValue([props.source, props.provider, props.sourceType, "traffic-cameras"]),
+            state: derivedState,
+            stream_url: streamUrl,
+          },
+        };
+      }
+
+      async function loadTrafficCameras() {
+        elements.statusText.textContent = "Finding warning cameras...";
+
+        async function fetchCameraPayload(url, cacheMode = "force-cache") {
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), settings.cameraFetchTimeoutMs);
+          let response;
+          try {
+            response = await fetch(url, { cache: cacheMode, signal: controller.signal });
+          } finally {
+            window.clearTimeout(timeoutId);
+          }
+          if (!response.ok) {
+            throw new Error(`Camera data HTTP ${response.status}`);
+          }
+          return response.json();
+        }
+
+        let data;
+        try {
+          data = await fetchCameraPayload(settings.cameraDataUrl, "no-store");
+        } catch (primaryError) {
+          try {
+            data = await fetchCameraPayload(settings.fallbackCameraDataUrl, "force-cache");
+          } catch {
+            throw primaryError;
+          }
+        }
+
+        const features = Array.isArray(data?.features) ? data.features : [];
+        state.cameras = features.map(normalizeCamera).filter(Boolean);
+      }
+
+      async function fetchEvents() {
+        const response = await fetch("/api/events/relevant", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Events HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        return Array.isArray(data?.features) ? data.features : [];
+      }
+
+      async function fetchServerMatches() {
+        const url = new URL(settings.matchesUrl, window.location.origin);
+        url.searchParams.set("fallbackRadiusMiles", String(settings.fallbackRadiusMiles));
+        url.searchParams.set("max", "80");
+        if (settings.streamSource !== "*") {
+          url.searchParams.set("streamSource", settings.streamSource);
+        }
+        if (settings.search) {
+          url.searchParams.set("search", settings.search);
+        }
+
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Warned camera matches HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        return Array.isArray(data?.matches) ? data.matches : [];
+      }
+
+      function clearCurrentStream() {
+        clearTimeout(state.connectTimeout);
+        if (state.hls) {
+          state.hls.destroy();
+          state.hls = null;
+        }
+        state.currentStreamUrl = "";
+        elements.video.pause();
+        elements.video.removeAttribute("src");
+        elements.video.load();
+        elements.video.style.opacity = "0";
+      }
+
+      function updateOverlay(match, message = "No warning cameras available right now") {
+        if (!match) {
+          clearCurrentStream();
+          elements.topPill.classList.add("hidden");
+          elements.status.classList.remove("hidden");
+          elements.statusText.textContent = message;
+          return;
+        }
+
+        const theme = classifyAlert(match.event);
+        document.documentElement.style.setProperty("--overlay-primary", theme.primary);
+        document.documentElement.style.setProperty("--overlay-secondary", theme.secondary);
+        elements.warningText.textContent = theme.label;
+        elements.locationText.textContent = String(match.stream.properties.name || match.stream.properties.location || "CAMERA").toUpperCase();
+        elements.topPill.classList.remove("hidden");
+        elements.status.classList.add("hidden");
+      }
+
+      function getWarnedCameraMatches(events) {
+        const activeWarnings = events
+          .filter(eventIsActiveWarning)
+          .sort((a, b) => {
+            const rankDiff = rankEvent(classifyAlert(a).label) - rankEvent(classifyAlert(b).label);
+            if (rankDiff !== 0) return rankDiff;
+            return (Date.parse(String(b?.properties?.issued || "")) || 0) - (Date.parse(String(a?.properties?.issued || "")) || 0);
+          });
+
+        const preparedWarnings = activeWarnings.map((event) => {
+          const polygonSet = getEventPolygonSet(event);
+          const bounds = getPolygonBounds(polygonSet);
+          const center = bounds
+            ? {
+                lon: (bounds.minLon + bounds.maxLon) / 2,
+                lat: (bounds.minLat + bounds.maxLat) / 2,
+              }
+            : null;
+
+          return { event, polygonSet, bounds, center };
+        });
+
+        const filteredStreams = state.cameras.filter((stream) => {
+          if (settings.streamSource !== "*" && String(stream.properties.source || "").toLowerCase() !== settings.streamSource) {
+            return false;
+          }
+          if (settings.search) {
+            const haystack = `${stream.properties.name} ${stream.properties.location} ${stream.properties.source}`.toLowerCase();
+            if (!haystack.includes(settings.search.toLowerCase())) {
+              return false;
+            }
+          }
+          return true;
+        });
+
+        const matches = [];
+        for (const stream of filteredStreams) {
+          const [lon, lat] = stream.geometry?.coordinates ?? [];
+          if (typeof lon !== "number" || typeof lat !== "number") continue;
+
+          for (const warning of preparedWarnings) {
+            if (warning.bounds) {
+              const margin = 0.08;
+              const outsideBounds =
+                lon < warning.bounds.minLon - margin ||
+                lon > warning.bounds.maxLon + margin ||
+                lat < warning.bounds.minLat - margin ||
+                lat > warning.bounds.maxLat + margin;
+
+              if (!outsideBounds && pointInPolygonSet(lon, lat, warning.polygonSet)) {
+                matches.push({ stream, event: warning.event });
+                break;
+              }
+            } else if (pointInPolygonSet(lon, lat, warning.polygonSet)) {
+              matches.push({ stream, event: warning.event });
+              break;
+            }
+
+            if (warning.center) {
+              const distanceMiles = haversineMiles(lat, lon, warning.center.lat, warning.center.lon);
+              if (distanceMiles <= settings.fallbackRadiusMiles) {
+                matches.push({ stream, event: warning.event });
+                break;
+              }
+            }
+          }
+        }
+
+        const uniqueMatches = [];
+        const seen = new Set();
+        for (const match of matches) {
+          const key = `${match.stream.properties.cameraId}|${match.event?.properties?.details?.tracking || match.event?.id || match.event?.properties?.event || ""}`;
+          if (seen.has(key)) {
+            continue;
+          }
+          seen.add(key);
+          uniqueMatches.push(match);
+        }
+
+        uniqueMatches.sort((a, b) => {
+          const rankDiff = rankEvent(classifyAlert(a.event).label) - rankEvent(classifyAlert(b.event).label);
+          if (rankDiff !== 0) return rankDiff;
+          return String(a.stream.properties.location || "").localeCompare(String(b.stream.properties.location || ""));
+        });
+
+        return uniqueMatches;
+      }
+
+      async function loadStream(match) {
+        const url = match?.stream?.properties?.stream_url;
+        if (!url) {
+          updateOverlay(null);
+          return;
+        }
+        if (state.currentStreamUrl === url) {
+          return;
+        }
+
+        state.currentStreamUrl = url;
+        elements.video.style.opacity = "0";
+        clearTimeout(state.connectTimeout);
+
+        if (state.hls) {
+          state.hls.destroy();
+          state.hls = null;
+        }
+
+        if (typeof Hls === "undefined") {
+          state.failedStreamUrls.add(url);
+          rotateToNext(true);
+          return;
+        }
+
+        const hls = new Hls({
+          maxBufferLength: 15,
+          maxMaxBufferLength: 30,
+          liveSyncDurationCount: settings.streamBufferDelay,
+          liveMaxLatencyDurationCount: 3,
+          backBufferLength: 10,
+          lowLatencyMode: false,
+        });
+
+        state.hls = hls;
+        hls.attachMedia(elements.video);
+        hls.loadSource(url);
+        state.connectTimeout = setTimeout(() => {
+          if (state.currentStreamUrl === url && getComputedStyle(elements.video).opacity === "0") {
+            state.failedStreamUrls.add(url);
+            rotateToNext(true);
+          }
+        }, 8000);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+          try {
+            clearTimeout(state.connectTimeout);
+            state.failedStreamUrls.delete(url);
+            elements.video.muted = settings.streamMuted;
+            await elements.video.play();
+            updateOverlay(match);
+            elements.video.style.opacity = "1";
+          } catch {
+            state.failedStreamUrls.add(url);
+            rotateToNext(true);
+          }
+        });
+
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data?.fatal) {
+            return;
+          }
+          clearTimeout(state.connectTimeout);
+          state.failedStreamUrls.add(url);
+          rotateToNext(true);
+        });
+      }
+
+      function rotateToNext(skipFailed = false) {
+        if (!state.matches.length) {
+          state.currentIndex = -1;
+          updateOverlay(null, "No warning cameras available right now");
+          return;
+        }
+
+        const total = state.matches.length;
+        for (let offset = 1; offset <= total; offset += 1) {
+          const nextIndex = (state.currentIndex + offset + total) % total;
+          const nextMatch = state.matches[nextIndex];
+          const nextUrl = nextMatch?.stream?.properties?.stream_url;
+          if (skipFailed && nextUrl && state.failedStreamUrls.has(nextUrl)) {
+            continue;
+          }
+          state.currentIndex = nextIndex;
+          loadStream(nextMatch);
+          return;
+        }
+
+        state.currentIndex = -1;
+        updateOverlay(null, "No warning cameras available right now");
+      }
+
+      async function syncMatches() {
+        try {
+          let matches;
+          try {
+            matches = await fetchServerMatches();
+          } catch (serverMatchError) {
+            if (!state.cameras.length) {
+              await loadTrafficCameras();
+            }
+            const events = await fetchEvents();
+            matches = getWarnedCameraMatches(events);
+            console.warn("[WarnedCams] Server match endpoint failed, using local fallback", serverMatchError);
+          }
+
+          const nextSignature = matches
+            .map((match) => `${match?.stream?.properties?.cameraId || match?.stream?.properties?.stream_url || ""}|${match?.event?.properties?.details?.tracking || match?.event?.id || ""}|${match?.event?.properties?.issued || ""}|${match?.event?.properties?.expires || ""}`)
+            .join("||");
+          if (nextSignature === state.currentEventsSignature && state.matches.length) {
+            return;
+          }
+
+          state.currentEventsSignature = nextSignature;
+          const previousUrl = state.matches[state.currentIndex]?.stream?.properties?.stream_url || "";
+          state.matches = matches;
+
+          const activeUrls = new Set(state.matches.map((match) => match?.stream?.properties?.stream_url).filter(Boolean));
+          state.failedStreamUrls.forEach((url) => {
+            if (!activeUrls.has(url)) {
+              state.failedStreamUrls.delete(url);
+            }
+          });
+
+          if (!state.matches.length) {
+            state.currentIndex = -1;
+            updateOverlay(null, "No warning cameras available right now");
+            return;
+          }
+
+          const matchingIndex = state.matches.findIndex((match) => match.stream.properties.stream_url === previousUrl);
+          state.currentIndex = matchingIndex >= 0 ? matchingIndex : -1;
+          if (state.currentIndex === -1) {
+            rotateToNext(true);
+          } else {
+            loadStream(state.matches[state.currentIndex]);
+          }
+        } catch (error) {
+          updateOverlay(null, error instanceof Error ? error.message : "Warned cameras failed to load");
+        }
+      }
+
+      function startRotationLoop() {
+        if (state.rotationTimer) {
+          clearInterval(state.rotationTimer);
+        }
+        state.rotationTimer = setInterval(() => {
+          if (state.matches.length) {
+            rotateToNext(true);
+          }
+        }, settings.rotationTime * 1000);
+      }
+
+      syncMatches();
+      startRotationLoop();
+      state.refreshTimer = setInterval(syncMatches, settings.refreshTime * 1000);
+    });
+  </script>
+</body>
+</html>

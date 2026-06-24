@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TuftsWeather Overlays Tropical Warning Strip</title>
+  <style>
+    :root {
+      --canvas-width: 1920px;
+      --canvas-height: 1080px;
+      --risk-top: 952px;
+      --risk-height: 47px;
+      --bar-left: 0px;
+      --bar-top: 999px;
+      --bar-width: 1500px;
+      --bar-height: 72px;
+      --label-width: 500px;
+      --zoom: 1;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      overflow: hidden;
+      background: transparent;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      transform-origin: top left;
+      transform: scale(var(--zoom));
+    }
+
+    #riskCard {
+      display: none;
+      position: fixed;
+      left: calc(var(--bar-left) + var(--label-width));
+      top: var(--risk-top);
+      width: calc(var(--bar-width) - var(--label-width));
+      height: var(--risk-height);
+      align-items: center;
+      overflow: hidden;
+      padding: 0 15px;
+      background: #26486f;
+    }
+
+    #card {
+      display: none;
+      position: fixed;
+      left: var(--bar-left);
+      top: var(--bar-top);
+      width: var(--bar-width);
+      height: var(--bar-height);
+      overflow: hidden;
+      background: transparent;
+      grid-template-columns: var(--label-width) minmax(0, 1fr);
+    }
+
+    .card-visible { display: grid !important; }
+    .risk-visible { display: flex !important; }
+
+    .risk-text,
+    .risk-panel,
+    .locations-panel {
+      color: #ffffff;
+      text-shadow:
+        -1px -1px 0 rgba(0,0,0,0.78),
+        1px -1px 0 rgba(0,0,0,0.78),
+        -1px 1px 0 rgba(0,0,0,0.78),
+        1px 1px 0 rgba(0,0,0,0.78),
+        0 2px 0 rgba(0,0,0,0.48);
+    }
+
+    .risk-text {
+      width: 100%;
+      font-size: 15px;
+      font-weight: 950;
+      text-transform: uppercase;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .risk-panel,
+    .locations-panel {
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      font-weight: 950;
+      text-transform: uppercase;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .risk-panel {
+      justify-content: center;
+      padding: 0 18px;
+      font-size: 20px;
+      background: #1e3552;
+      text-align: center;
+    }
+
+    .locations-panel {
+      padding: 0 18px;
+      font-size: 20px;
+      background: #26486f;
+    }
+
+    .risk-track,
+    .locations-track {
+      display: inline-flex;
+      align-items: center;
+      min-width: max-content;
+      white-space: nowrap;
+      will-change: transform;
+    }
+
+    .risk-track.marquee,
+    .locations-track.marquee {
+      animation-name: marquee-scroll;
+      animation-timing-function: linear;
+      animation-iteration-count: 1;
+      animation-fill-mode: both;
+    }
+
+    .risk-track.marquee { animation-delay: 0.8s; }
+    .locations-track.marquee { animation-delay: 1s; }
+    .gap { display: inline-block; width: 140px; flex: 0 0 auto; }
+
+    #status {
+      display: none;
+      position: fixed;
+      right: 10px;
+      bottom: 8px;
+      padding: 7px 9px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.88);
+      color: #15202b;
+      font: 12px/1.35 Arial, sans-serif;
+    }
+
+    #status.visible { display: block; }
+
+    @keyframes marquee-scroll {
+      from { transform: translateX(0); }
+      to { transform: translateX(calc(-1 * var(--scroll-distance, 0px))); }
+    }
+  </style>
+</head>
+<body>
+  <article id="riskCard" aria-live="polite">
+    <div class="risk-text">
+      <div class="risk-track" id="riskTrack">
+        <span id="riskCopy"></span>
+      </div>
+    </div>
+  </article>
+  <article id="card" aria-live="polite">
+    <div class="risk-panel" id="riskPanel"></div>
+    <div class="locations-panel" id="locationsPanel">
+      <div class="locations-track" id="locationsTrack">
+        <span id="locationsCopy"></span>
+      </div>
+    </div>
+  </article>
+  <div id="status">Waiting for tropical alerts...</div>
+
+  <script>
+    const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+    const params = new URLSearchParams(window.location.search);
+    const zoom = Number(params.get("setElementZoomLevel") || "1");
+    const minDisplaySeconds = Math.max(8, Number(params.get("setMinDisplaySeconds") || "10"));
+    const maxDisplaySeconds = Math.max(minDisplaySeconds, Number(params.get("setMaxDisplaySeconds") || "20"));
+    const debug = params.get("debug") === "1";
+    document.documentElement.style.setProperty("--zoom", String(Number.isFinite(zoom) && zoom > 0 ? zoom : 1));
+
+    const riskCardEl = document.getElementById("riskCard");
+    const riskTrackEl = document.getElementById("riskTrack");
+    const riskCopyEl = document.getElementById("riskCopy");
+    const cardEl = document.getElementById("card");
+    const riskPanelEl = document.getElementById("riskPanel");
+    const locationsPanelEl = document.getElementById("locationsPanel");
+    const locationsTrackEl = document.getElementById("locationsTrack");
+    const locationsCopyEl = document.getElementById("locationsCopy");
+    const statusEl = document.getElementById("status");
+    if (debug) statusEl.classList.add("visible");
+
+    let items = [];
+    let signature = "";
+    let index = 0;
+    let socket = null;
+    let timer = null;
+
+    function darkenColor(color, amount) {
+      const value = String(color || "").replace("#", "");
+      if (!/^[0-9a-fA-F]{6}$/.test(value)) return color;
+      const factor = Math.max(0, 1 - amount);
+      return "#" + [0,2,4].map((offset) => {
+        const channel = Number.parseInt(value.slice(offset, offset + 2), 16);
+        return Math.round(channel * factor).toString(16).padStart(2, "0");
+      }).join("");
+    }
+
+    function fitText(el, minFontSize) {
+      el.style.fontSize = "";
+      let size = Number.parseFloat(getComputedStyle(el).fontSize);
+      while ((el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) && size > minFontSize) {
+        size -= 1;
+        el.style.fontSize = `${size}px`;
+      }
+    }
+
+    function setupMarquee(trackEl, copyEl, containerEl, gapClass) {
+      trackEl.classList.remove("marquee");
+      trackEl.style.removeProperty("--scroll-distance");
+      trackEl.style.removeProperty("animation-duration");
+      Array.from(trackEl.querySelectorAll("[data-clone='true'], .gap")).forEach((node) => node.remove());
+
+      const overflow = copyEl.scrollWidth > containerEl.clientWidth;
+      if (!overflow) return 0;
+
+      const gap = document.createElement("span");
+      gap.className = `gap ${gapClass}`;
+      gap.textContent = "";
+      const clone = copyEl.cloneNode(true);
+      clone.dataset.clone = "true";
+      trackEl.append(gap, clone);
+
+      const distance = copyEl.scrollWidth + gap.offsetWidth;
+      const duration = Math.max(8, Math.min(24, distance / 60));
+      trackEl.style.setProperty("--scroll-distance", `${distance}px`);
+      trackEl.style.animationDuration = `${duration}s`;
+      void trackEl.offsetWidth;
+      trackEl.classList.add("marquee");
+      return duration + 1.5;
+    }
+
+    function hide(message) {
+      riskCardEl.classList.remove("risk-visible");
+      cardEl.classList.remove("card-visible");
+      statusEl.textContent = message;
+    }
+
+    function renderCurrent() {
+      if (!items.length) {
+        hide("No tropical warning products active.");
+        return;
+      }
+
+      const item = items[index % items.length];
+      const baseColor = item.color || "#26486f";
+      const darker = darkenColor(baseColor, 0.25);
+      riskPanelEl.textContent = item.label || "TROPICAL ALERT";
+      locationsCopyEl.textContent = item.locations || "ACTIVE TROPICAL ALERT";
+      riskCopyEl.textContent = item.riskText || "TROPICAL CONDITIONS POSSIBLE.";
+      riskPanelEl.style.background = darker;
+      locationsPanelEl.style.background = baseColor;
+      riskCardEl.style.background = baseColor;
+      riskCardEl.classList.add("risk-visible");
+      cardEl.classList.add("card-visible");
+
+      fitText(riskPanelEl, 12);
+      fitText(locationsCopyEl, 12);
+      fitText(riskCopyEl, 10);
+
+      const riskHold = setupMarquee(riskTrackEl, riskCopyEl, riskCardEl, "risk-gap");
+      const locationHold = setupMarquee(locationsTrackEl, locationsCopyEl, locationsPanelEl, "location-gap");
+      const hold = Math.min(maxDisplaySeconds, Math.max(minDisplaySeconds, riskHold, locationHold));
+      statusEl.textContent = `${items.length} tropical alert(s). Showing ${index + 1} of ${items.length}.`;
+
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        index = (index + 1) % items.length;
+        renderCurrent();
+      }, hold * 1000);
+    }
+
+    function applySummary(summary) {
+      const next = Array.isArray(summary?.tropicalStripItems) ? summary.tropicalStripItems : [];
+      const nextSignature = next.map((item) => `${item.key}|${item.label}|${item.locations}|${item.riskText}`).join("||");
+      if (nextSignature === signature) return;
+      signature = nextSignature;
+      items = next;
+      index = 0;
+      clearTimeout(timer);
+      renderCurrent();
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/api/status", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        applySummary(payload.summary);
+      } catch (_) {}
+    }
+
+    function handle(raw) {
+      try {
+        const data = JSON.parse(raw);
+        if (data.type === "subscribe" && data.value === "summary") applySummary(data.message);
+        if (data.type === "update" && data.message?.summary) applySummary(data.message.summary);
+        if (data.type === "subscribe" && data.value === "liveAlerts") refresh();
+      } catch (_) {}
+    }
+
+    function connect() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+      socket = new WebSocket(wsUrl);
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({ type: "subscribe", message: ["summary"] }));
+        refresh();
+      });
+      socket.addEventListener("message", (event) => handle(event.data));
+      socket.addEventListener("close", () => {
+        socket = null;
+        window.setTimeout(connect, 1000);
+      });
+      socket.addEventListener("error", () => socket && socket.close());
+    }
+
+    refresh();
+    connect();
+    window.setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

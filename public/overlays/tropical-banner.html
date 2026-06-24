@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tropical Banner</title>
+  <style>
+    :root {
+      --banner-width: 1920px;
+      --banner-height: 1080px;
+      --clock-reserved-width: 380px;
+      --alert-clock-width: 250px;
+      --no-alert-clock-width: 310px;
+      --alert-clock-center-y: 67.5px;
+      --no-alert-band-height: 135px;
+      --no-alert-blue: #006fd6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: var(--banner-width);
+      min-height: var(--banner-height);
+      overflow: hidden;
+      background: transparent;
+      color: #fff;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    #bannerViewport {
+      position: relative;
+      z-index: 1;
+      display: none;
+      width: var(--banner-width);
+      height: 180px;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    #topBandFill {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 180px;
+      background: transparent;
+      z-index: 0;
+    }
+
+    #bannerImage {
+      position: relative;
+      z-index: 1;
+      display: block;
+      width: var(--banner-width);
+      height: auto;
+      vertical-align: top;
+    }
+
+    #noAlerts {
+      display: block;
+      width: var(--banner-width);
+      height: 135px;
+      overflow: hidden;
+    }
+
+    .no-alert-strip {
+      width: var(--banner-width);
+      height: 135px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 0 var(--clock-reserved-width) 0 28px;
+      background: var(--no-alert-blue);
+      color: #fff;
+      font-weight: 900;
+      line-height: 1;
+      text-transform: uppercase;
+      overflow: hidden;
+    }
+
+    .no-alert-text {
+      display: block;
+      max-width: 100%;
+      font-size: clamp(28px, 4.8vw, 52px);
+      line-height: 1.05;
+      text-align: left;
+      white-space: nowrap;
+      transform-origin: left center;
+    }
+
+    #time {
+      position: fixed;
+      top: var(--alert-clock-center-y);
+      right: calc((var(--clock-reserved-width) - var(--alert-clock-width)) / 2);
+      transform: translateY(-50%);
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: var(--alert-clock-width);
+      font-family: Arial, sans-serif;
+      font-size: 32px;
+      font-weight: 700;
+      color: lightgray;
+      background: rgba(0, 0, 0, 0.75);
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    body.no-alert-active #time {
+      top: calc(var(--no-alert-band-height) / 2);
+      right: calc((var(--clock-reserved-width) - var(--no-alert-clock-width)) / 2);
+      width: var(--no-alert-clock-width);
+      font-size: 38px;
+      padding: 12px;
+    }
+
+    #status {
+      display: none;
+      position: fixed;
+      right: 10px;
+      bottom: 8px;
+      max-width: min(620px, calc(100vw - 20px));
+      padding: 7px 9px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.88);
+      color: #15202b;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 1px 8px rgba(0, 0, 0, 0.12);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #status.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body class="no-alert-active">
+  <section id="bannerViewport" aria-label="Active Atlantic tropical cyclone banner">
+    <div id="topBandFill"></div>
+    <img id="bannerImage" alt="">
+  </section>
+
+  <section id="noAlerts" aria-label="No active Atlantic tropical cyclones">
+    <div class="no-alert-strip">
+      <div class="no-alert-text">No tropical cyclones active right now</div>
+    </div>
+  </section>
+
+  <div id="time"></div>
+  <div id="status">Checking Atlantic tropical cyclones...</div>
+
+  <script>
+    const LOCAL_OVERLAYS_WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+    const CHECK_INTERVAL_MS = 60000;
+    const TIME_ZONE_ROTATION_MS = 10000;
+    const STORM_FEED_URLS = [
+      "/api/tropical/systems"
+    ];
+
+    const BANNERS = [
+      { key: "tropical-depression", rank: 0, label: "Tropical Depression", fill: "#6a6a6a", file: "assets/tropical/tropical depression.png" },
+      { key: "tropical-storm", rank: 1, label: "Tropical Storm", fill: "#4f7fe8", file: "assets/tropical/tropical storm.png" },
+      { key: "cat-1", rank: 2, label: "Category 1", fill: "#f2dc00", file: "assets/tropical/cat 1.png" },
+      { key: "cat-2", rank: 3, label: "Category 2", fill: "#f1b300", file: "assets/tropical/cat 2.png" },
+      { key: "cat-3", rank: 4, label: "Category 3", fill: "#ff7c21", file: "assets/tropical/cat 3.png" },
+      { key: "cat-4", rank: 5, label: "Category 4", fill: "#ff4020", file: "assets/tropical/cat 4.png" },
+      { key: "cat-5", rank: 6, label: "Category 5", fill: "#d3212d", file: "assets/tropical/cat 5.png" }
+    ];
+
+    const bannerByKey = Object.fromEntries(BANNERS.map((banner) => [banner.key, banner]));
+    const params = new URLSearchParams(window.location.search);
+    const debugStatus = params.get("debug") === "1";
+
+    const bannerViewport = document.getElementById("bannerViewport");
+    const topBandFill = document.getElementById("topBandFill");
+    const bannerImage = document.getElementById("bannerImage");
+    const noAlerts = document.getElementById("noAlerts");
+    const timeEl = document.getElementById("time");
+    const statusEl = document.getElementById("status");
+
+    const timeZones = [
+      { label: "ET", timeZone: "America/New_York" },
+      { label: "CT", timeZone: "America/Chicago" },
+      { label: "MT", timeZone: "America/Denver" },
+      { label: "PT", timeZone: "America/Los_Angeles" }
+    ];
+
+    let timeZoneIndex = 0;
+    let lastRenderSignature = "";
+    let socket = null;
+    let reconnectTimer = null;
+    const BANNER_CACHE_KEY = "tropicalBanner.lastActiveMatch";
+
+    if (debugStatus) {
+      statusEl.classList.add("visible");
+    }
+
+    function formatTime(now, timeZone) {
+      return now.toLocaleTimeString("en-US", {
+        timeZone,
+        hour12: true,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+
+    function updateTime() {
+      const now = new Date();
+      const currentZone = timeZones[timeZoneIndex];
+      timeEl.textContent = formatTime(now, currentZone.timeZone) + " " + currentZone.label;
+    }
+
+    function rotateTimeZone() {
+      timeZoneIndex = (timeZoneIndex + 1) % timeZones.length;
+      updateTime();
+    }
+
+    function bannerImageUrl(fileName) {
+      return new URL(fileName, window.location.href).href;
+    }
+
+    async function fetchStormUrl(url, timeoutMs = 4500) {
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+      const options = { cache: "no-store" };
+      if (controller) options.signal = controller.signal;
+
+      try {
+        const response = await fetch(url, options);
+        if (!response.ok) throw new Error("HTTP " + response.status + " from " + url);
+        const text = await response.text();
+        let payload = JSON.parse(text);
+        if (payload && typeof payload.contents === "string") {
+          payload = JSON.parse(payload.contents);
+        }
+        if (payload && Array.isArray(payload.activeStorms)) {
+          return payload;
+        }
+        throw new Error("Unexpected payload from " + url);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+
+    async function fetchStormData() {
+      try {
+        return await Promise.any(STORM_FEED_URLS.map((url) => fetchStormUrl(url)));
+      } catch (error) {
+        const messages = error && error.errors
+          ? error.errors.map((err) => err && err.message ? err.message : String(err)).join("; ")
+          : (error && error.message ? error.message : String(error));
+        throw new Error(messages || "Unknown fetch failure");
+      }
+    }
+
+    function saveActiveMatch(match) {
+      try {
+        localStorage.setItem(BANNER_CACHE_KEY, JSON.stringify({
+          storm: match.storm,
+          bannerKey: match.banner.key
+        }));
+      } catch (_) {}
+    }
+
+    function clearActiveMatch() {
+      try {
+        localStorage.removeItem(BANNER_CACHE_KEY);
+      } catch (_) {}
+    }
+
+    function loadActiveMatch() {
+      try {
+        const cached = JSON.parse(localStorage.getItem(BANNER_CACHE_KEY) || "null");
+        const banner = cached && bannerByKey[cached.bannerKey];
+        if (cached && cached.storm && banner) {
+          return { storm: cached.storm, banner };
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    function isAtlanticStorm(storm) {
+      const binNumber = String(storm.binNumber || "").toUpperCase();
+      const id = String(storm.id || "").toLowerCase();
+      return binNumber.startsWith("AT") || id.startsWith("al");
+    }
+
+    function classifyStorm(storm) {
+      const classification = String(storm.classification || "").toUpperCase();
+      const intensity = Number.parseInt(storm.intensity, 10);
+
+      if (classification === "PC" || classification === "PTC") {
+        return intensity >= 34 ? bannerByKey["tropical-storm"] : bannerByKey["tropical-depression"];
+      }
+
+      if (classification === "TD" || classification === "SD") {
+        return bannerByKey["tropical-depression"];
+      }
+
+      if (classification === "TS" || classification === "SS") {
+        return bannerByKey["tropical-storm"];
+      }
+
+      if (classification === "HU") {
+        if (intensity >= 137) return bannerByKey["cat-5"];
+        if (intensity >= 113) return bannerByKey["cat-4"];
+        if (intensity >= 96) return bannerByKey["cat-3"];
+        if (intensity >= 83) return bannerByKey["cat-2"];
+        if (intensity >= 64) return bannerByKey["cat-1"];
+      }
+
+      return null;
+    }
+
+    function getHighestAtlanticBanner(storms) {
+      let highest = null;
+
+      for (const storm of storms) {
+        if (!isAtlanticStorm(storm)) {
+          continue;
+        }
+
+        const banner = classifyStorm(storm);
+        if (!banner) {
+          continue;
+        }
+
+        if (!highest || banner.rank > highest.banner.rank) {
+          highest = { storm, banner };
+        }
+      }
+
+      return highest;
+    }
+
+    function setNoAlertState(message, clearCache = true) {
+      const signature = "none|" + message;
+      if (signature === lastRenderSignature) {
+        if (debugStatus) {
+          statusEl.textContent = message;
+        }
+        return;
+      }
+
+      lastRenderSignature = signature;
+      document.body.classList.add("no-alert-active");
+      bannerViewport.style.display = "none";
+      noAlerts.style.display = "block";
+      topBandFill.style.background = "transparent";
+      bannerImage.removeAttribute("src");
+      bannerImage.alt = "";
+      if (clearCache) clearActiveMatch();
+      statusEl.textContent = message;
+    }
+
+    function setAlertState(match, message) {
+      const signature = match.banner.key + "|" + String(match.storm.id || match.storm.name || "") + "|" + String(match.storm.lastUpdate || "");
+      if (signature === lastRenderSignature) {
+        if (debugStatus) {
+          statusEl.textContent = message;
+        }
+        return;
+      }
+
+      lastRenderSignature = signature;
+      document.body.classList.remove("no-alert-active");
+      noAlerts.style.display = "none";
+      bannerViewport.style.display = "block";
+      topBandFill.style.background = match.banner.fill;
+      bannerImage.src = bannerImageUrl(match.banner.file);
+      bannerImage.alt = match.banner.label + (match.storm.name ? " - " + match.storm.name : "");
+      saveActiveMatch(match);
+      statusEl.textContent = message;
+    }
+
+    async function updateBanner() {
+      try {
+        const payload = await fetchStormData();
+        const storms = Array.isArray(payload.activeStorms) ? payload.activeStorms : [];
+        const match = getHighestAtlanticBanner(storms);
+
+        if (!match) {
+          setNoAlertState("No Atlantic tropical cyclones active");
+          return;
+        }
+
+        const stormName = match.storm.name ? " - " + match.storm.name : "";
+        setAlertState(match, "Showing highest Atlantic system: " + match.banner.label + stormName);
+      } catch (error) {
+        const cached = loadActiveMatch();
+        if (cached) {
+          const stormName = cached.storm.name ? " - " + cached.storm.name : "";
+          setAlertState(cached, "Showing cached Atlantic system: " + cached.banner.label + stormName);
+          setStatusText("Tropical feed unavailable: " + ((error && error.message) ? error.message : String(error)));
+        } else {
+          setNoAlertState("Tropical feed unavailable: " + ((error && error.message) ? error.message : String(error)));
+        }
+      }
+    }
+
+    function setStatusText(message) {
+      if (debugStatus) {
+        statusEl.textContent = message;
+      }
+    }
+
+    function connectLocalOverlays() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      socket = new WebSocket(LOCAL_OVERLAYS_WS_URL);
+
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({ type: "subscribe", message: ["summary"] }));
+      });
+
+      socket.addEventListener("message", () => {
+        updateBanner();
+      });
+
+      socket.addEventListener("close", () => {
+        socket = null;
+        if (!reconnectTimer) {
+          reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = null;
+            connectLocalOverlays();
+          }, 1000);
+        }
+      });
+
+      socket.addEventListener("error", () => {
+        if (socket) socket.close();
+      });
+    }
+
+    setNoAlertState("Checking Atlantic tropical cyclones...", false);
+    const cachedMatch = loadActiveMatch();
+    if (cachedMatch) {
+      const stormName = cachedMatch.storm.name ? " - " + cachedMatch.storm.name : "";
+      setAlertState(cachedMatch, "Showing cached Atlantic system: " + cachedMatch.banner.label + stormName);
+    }
+    updateTime();
+    updateBanner();
+    connectLocalOverlays();
+
+    window.setInterval(updateTime, 1000);
+    window.setInterval(rotateTimeZone, TIME_ZONE_ROTATION_MS);
+    window.setInterval(updateBanner, CHECK_INTERVAL_MS);
+  </script>
+</body>
+</html>

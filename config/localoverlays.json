@@ -1,0 +1,31 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 4318
+  },
+  "nwws": {
+    "enabled": true,
+    "username": "",
+    "password": "",
+    "nickname": "TuftsWeather Overlays",
+    "reconnectIntervalSeconds": 60,
+    "backfillIntervalSeconds": 60
+  },
+  "nwsApi": {
+    "endpoint": "https://api.weather.gov/alerts/active",
+    "pollIntervalSeconds": 30
+  },
+  "filters": {
+    "events": [],
+    "ignoredEvents": [
+      "Xx",
+      "Test Message"
+    ],
+    "ignoredIcao": [],
+    "filteredIcao": [],
+    "ugcFilter": [],
+    "stateFilter": [],
+    "ignoreTestProducts": true,
+    "checkExpired": true
+  }
+}

@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tropical Outline</title>
+  <style>
+    :root {
+      --canvas-width: 1920px;
+      --canvas-height: 1080px;
+      --outline-width: 6px;
+      --outline-color: #006fd6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      overflow: hidden;
+      background: transparent;
+    }
+
+    #outlineLayer {
+      position: fixed;
+      inset: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      pointer-events: none;
+    }
+
+    .outline-box {
+      position: fixed;
+      border: var(--outline-width) solid var(--outline-color);
+      pointer-events: none;
+    }
+
+    #status {
+      display: none;
+      position: fixed;
+      right: 10px;
+      bottom: 8px;
+      padding: 7px 9px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.9);
+      color: #15202b;
+      font: 12px/1.35 Arial, sans-serif;
+      z-index: 10;
+    }
+
+    #status.visible {
+      display: block;
+    }
+
+    .top-banner {
+      left: 0;
+      top: 0;
+      width: 1500px;
+      height: 180px;
+      border-bottom: 0;
+    }
+
+    .main-scene {
+      left: 0;
+      top: 180px;
+      width: 1500px;
+      height: 770px;
+      border-top: 0;
+    }
+
+    .webcam-box {
+      left: 1500px;
+      top: 0;
+      width: 420px;
+      height: 408px;
+    }
+
+    .logo-box {
+      left: 1500px;
+      top: 408px;
+      width: 420px;
+      height: 179px;
+    }
+
+    .counter-box {
+      left: 1500px;
+      top: 587px;
+      width: 420px;
+      height: 257px;
+    }
+
+    .camera-box {
+      left: 1500px;
+      top: 844px;
+      width: 420px;
+      height: 236px;
+    }
+
+    .ticker-label-top {
+      display: none;
+      left: 0;
+      top: 952px;
+      width: 650px;
+      height: 47px;
+    }
+
+    .ticker-main-top {
+      display: none;
+      left: 0;
+      top: 952px;
+      width: 1502px;
+      height: 47px;
+    }
+
+    .ticker-label-bottom {
+      left: 0;
+      top: 999px;
+      width: 500px;
+      height: 72px;
+    }
+
+    .ticker-main-bottom {
+      left: 500px;
+      top: 999px;
+      width: 1000px;
+      height: 72px;
+    }
+  </style>
+</head>
+<body>
+  <div id="outlineLayer" aria-label="Current tropical scene outlines">
+    <div class="outline-box top-banner"></div>
+    <div class="outline-box main-scene"></div>
+    <div class="outline-box webcam-box"></div>
+    <div class="outline-box logo-box"></div>
+    <div class="outline-box counter-box"></div>
+    <div class="outline-box camera-box"></div>
+    <div class="outline-box ticker-label-top"></div>
+    <div class="outline-box ticker-main-top"></div>
+    <div class="outline-box ticker-label-bottom"></div>
+    <div class="outline-box ticker-main-bottom"></div>
+  </div>
+  <div id="status">Checking Atlantic tropical systems...</div>
+
+  <script>
+    const LOCAL_OVERLAYS_WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+    const FEED_URLS = [
+      "/api/tropical/systems"
+    ];
+    const CHECK_INTERVAL_MS = 60000;
+    const params = new URLSearchParams(window.location.search);
+    const debug = params.get("debug") === "1";
+
+    const LEVELS = [
+      { key: "none", rank: 0, label: "No Tropical Cyclones", color: "#006fd6" },
+      { key: "tropical-depression", rank: 1, label: "Tropical Depression", color: "#3f67a6" },
+      { key: "tropical-storm", rank: 2, label: "Tropical Storm", color: "#d48700" },
+      { key: "cat-1", rank: 3, label: "Category 1", color: "#d10000" },
+      { key: "cat-2", rank: 4, label: "Category 2", color: "#bd0000" },
+      { key: "cat-3", rank: 5, label: "Category 3", color: "#a000c8" },
+      { key: "cat-4", rank: 6, label: "Category 4", color: "#8d0079" },
+      { key: "cat-5", rank: 7, label: "Category 5", color: "#ff1493" }
+    ];
+
+    const levelByKey = Object.fromEntries(LEVELS.map((level) => [level.key, level]));
+    const outlineBoxes = Array.from(document.querySelectorAll(".outline-box"));
+    const statusEl = document.getElementById("status");
+    let lastColor = "";
+    let socket = null;
+    let reconnectTimer = null;
+
+    if (debug) {
+      statusEl.classList.add("visible");
+    }
+
+    function setStatus(message) {
+      if (debug) {
+        statusEl.textContent = message;
+      }
+    }
+
+    async function fetchStormData() {
+      let lastError = "Unknown fetch failure";
+
+      for (const url of FEED_URLS) {
+        try {
+          const response = await fetch(url, { cache: "no-store" });
+          if (!response.ok) {
+            lastError = "HTTP " + response.status;
+            continue;
+          }
+
+          const text = await response.text();
+          let payload = JSON.parse(text);
+
+          if (payload && typeof payload.contents === "string") {
+            payload = JSON.parse(payload.contents);
+          }
+
+          if (payload && Array.isArray(payload.activeStorms)) {
+            return payload.activeStorms;
+          }
+
+          lastError = "Unexpected CurrentStorms payload";
+        } catch (error) {
+          lastError = error && error.message ? error.message : String(error);
+        }
+      }
+
+      throw new Error(lastError);
+    }
+
+    function isAtlanticStorm(storm) {
+      const binNumber = String(storm.binNumber || "").toUpperCase();
+      const id = String(storm.id || "").toLowerCase();
+      return binNumber.startsWith("AT") || id.startsWith("al");
+    }
+
+    function classifyStorm(storm) {
+      const classification = String(storm.classification || "").toUpperCase();
+      const intensity = Number.parseInt(storm.intensity, 10);
+
+      if (classification === "TD" || classification === "SD" || classification === "STD") {
+        return levelByKey["tropical-depression"];
+      }
+
+      if (classification === "TS" || classification === "SS" || classification === "STS") {
+        return levelByKey["tropical-storm"];
+      }
+
+      if (classification === "HU") {
+        if (intensity >= 137) return levelByKey["cat-5"];
+        if (intensity >= 113) return levelByKey["cat-4"];
+        if (intensity >= 96) return levelByKey["cat-3"];
+        if (intensity >= 83) return levelByKey["cat-2"];
+        if (intensity >= 64) return levelByKey["cat-1"];
+      }
+
+      return null;
+    }
+
+    function getHighestLevel(storms) {
+      let highest = levelByKey.none;
+
+      for (const storm of storms) {
+        if (!isAtlanticStorm(storm)) {
+          continue;
+        }
+
+        const level = classifyStorm(storm);
+        if (level && level.rank > highest.rank) {
+          highest = level;
+        }
+      }
+
+      return highest;
+    }
+
+    function applyColor(color, message) {
+      if (color === lastColor) {
+        setStatus(message);
+        return;
+      }
+
+      lastColor = color;
+      document.documentElement.style.setProperty("--outline-color", color);
+      for (const box of outlineBoxes) {
+        box.style.borderColor = color;
+      }
+      setStatus(message);
+    }
+
+    async function refresh() {
+      try {
+        const storms = await fetchStormData();
+        const highest = getHighestLevel(storms);
+        applyColor(highest.color, "Showing outline color for " + highest.label);
+      } catch (error) {
+        applyColor(levelByKey.none.color, "Tropical feed unavailable: " + (error && error.message ? error.message : String(error)));
+      }
+    }
+
+    function connectLocalOverlays() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      socket = new WebSocket(LOCAL_OVERLAYS_WS_URL);
+
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({ type: "subscribe", message: ["summary"] }));
+      });
+
+      socket.addEventListener("message", () => {
+        refresh();
+      });
+
+      socket.addEventListener("close", () => {
+        socket = null;
+        if (!reconnectTimer) {
+          reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = null;
+            connectLocalOverlays();
+          }, 1000);
+        }
+      });
+
+      socket.addEventListener("error", () => {
+        if (socket) {
+          socket.close();
+        }
+      });
+    }
+
+    refresh();
+    connectLocalOverlays();
+    window.setInterval(refresh, CHECK_INTERVAL_MS);
+  </script>
+</body>
+</html>

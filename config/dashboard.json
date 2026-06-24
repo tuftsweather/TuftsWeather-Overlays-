@@ -1,0 +1,6 @@
+{
+  "projectName": "TuftsWeather Overlays",
+  "mode": "local-only",
+  "host": "127.0.0.1",
+  "notes": "Placeholder config for the dashboard shell. Real sources and overlay routes will be added over time."
+}

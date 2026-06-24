@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TuftsWeather Overlays Date Overlay</title>
+  <style>
+    :root {
+      --canvas-width: 1920px;
+      --canvas-height: 1080px;
+      --zoom: 1;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      overflow: hidden;
+      background: transparent;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      transform-origin: top left;
+      transform: scale(var(--zoom));
+    }
+
+    #dateOverlay {
+      position: fixed;
+      left: 26px;
+      top: 150px;
+      display: block;
+      color: #ffffff;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    #dateText {
+      display: block;
+      white-space: nowrap;
+      font-size: 42px;
+      font-weight: 950;
+      letter-spacing: 0.04em;
+      text-shadow:
+        -1px -1px 0 rgba(0, 0, 0, 0.82),
+        1px -1px 0 rgba(0, 0, 0, 0.82),
+        -1px 1px 0 rgba(0, 0, 0, 0.82),
+        1px 1px 0 rgba(0, 0, 0, 0.82),
+        0 3px 0 rgba(0, 0, 0, 0.48);
+    }
+  </style>
+</head>
+<body>
+  <section id="dateOverlay" aria-label="Today date">
+    <span id="dateText"></span>
+  </section>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const zoom = Number(params.get("setElementZoomLevel") || params.get("zoom") || "1");
+    document.documentElement.style.setProperty("--zoom", String(Number.isFinite(zoom) && zoom > 0 ? zoom : 1));
+
+    const dateText = document.getElementById("dateText");
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    function updateDate() {
+      dateText.textContent = formatter.format(new Date());
+    }
+
+    updateDate();
+    window.setInterval(() => {
+      const previous = dateText.textContent;
+      updateDate();
+      if (dateText.textContent !== previous) {
+        updateDate();
+      }
+    }, 60000);
+  </script>
+</body>
+</html>

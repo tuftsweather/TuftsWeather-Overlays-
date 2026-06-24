@@ -1,0 +1,1061 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TuftsWeather Overlays Winter Popup Alerts</title>
+  <style>
+    :root {
+      --canvas-width: 1920px;
+      --canvas-height: 1080px;
+      --card-width: 860px;
+      --card-height: 174px;
+      --entry-ms: 320ms;
+      --exit-ms: 240ms;
+      --zoom: 1;
+      --shadow: 0 18px 44px rgba(0, 0, 0, 0.52);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      overflow: hidden;
+      background: transparent;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      transform-origin: top left;
+      transform: scale(var(--zoom));
+    }
+
+    #stage {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    #stack {
+      position: absolute;
+      left: 32px;
+      bottom: 52px;
+      width: var(--card-width);
+      min-height: var(--card-height);
+    }
+
+    .alert-card {
+      width: var(--card-width);
+      min-height: var(--card-height);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 138px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 38%),
+        linear-gradient(90deg, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0)),
+        var(--accent);
+      box-shadow: var(--shadow);
+      border-left: 3px solid rgba(255, 255, 255, 0.68);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      overflow: hidden;
+      opacity: 0;
+      transform: translateX(-120px) scale(0.96);
+      animation: alert-in var(--entry-ms) ease forwards;
+      position: relative;
+      clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 50%, calc(100% - 18px) 100%, 0 100%);
+    }
+
+    .alert-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), transparent 18%, transparent 82%, rgba(0, 0, 0, 0.28));
+      pointer-events: none;
+    }
+
+    .alert-card.exiting {
+      animation: alert-out var(--exit-ms) ease forwards;
+    }
+
+    .alert-body {
+      display: grid;
+      grid-template-rows: 96px 1fr;
+      min-width: 0;
+    }
+
+    .alert-meta {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 18px 10px 18px;
+      background: linear-gradient(180deg, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0.2));
+      min-width: 0;
+    }
+
+    .alert-action {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 60px;
+      padding: 7px 10px 6px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(75, 0, 0, 0.5);
+      color: #fff;
+      text-transform: uppercase;
+      font-weight: 900;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-shadow:
+        -1px -1px 0 rgba(0, 0, 0, 0.82),
+        1px -1px 0 rgba(0, 0, 0, 0.82),
+        -1px 1px 0 rgba(0, 0, 0, 0.82),
+        1px 1px 0 rgba(0, 0, 0, 0.82),
+        0 2px 0 rgba(0, 0, 0, 0.48);
+      white-space: nowrap;
+    }
+
+    .alert-event {
+      min-width: 0;
+      color: #fff;
+      text-transform: uppercase;
+      font-weight: 900;
+      font-size: 30px;
+      letter-spacing: 0;
+      text-shadow:
+        -1px -1px 0 rgba(0, 0, 0, 0.82),
+        1px -1px 0 rgba(0, 0, 0, 0.82),
+        -1px 1px 0 rgba(0, 0, 0, 0.82),
+        1px 1px 0 rgba(0, 0, 0, 0.82),
+        0 3px 0 rgba(0, 0, 0, 0.5);
+      line-height: 1.02;
+      white-space: normal;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .alert-bottom {
+      display: grid;
+      grid-template-columns: minmax(0, 0.62fr) minmax(0, 0.38fr);
+      align-items: stretch;
+      gap: 0;
+      padding: 0 18px;
+      background: linear-gradient(180deg, rgba(95, 0, 0, 0.24), rgba(70, 0, 0, 0.4));
+      color: rgba(255,255,255,0.96);
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      line-height: 1.15;
+      white-space: normal;
+      overflow: hidden;
+      padding-top: 8px;
+      padding-bottom: 8px;
+      text-shadow:
+        -1px -1px 0 rgba(0, 0, 0, 0.78),
+        1px -1px 0 rgba(0, 0, 0, 0.78),
+        -1px 1px 0 rgba(0, 0, 0, 0.78),
+        1px 1px 0 rgba(0, 0, 0, 0.78),
+        0 2px 0 rgba(0, 0, 0, 0.44);
+    }
+
+    .alert-counties,
+    .alert-threat {
+      min-width: 0;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .alert-counties {
+      align-self: center;
+      padding-right: 12px;
+      border-right: 1px solid rgba(255, 255, 255, 0.14);
+      -webkit-line-clamp: 3;
+      font-size: 18px;
+    }
+
+    .alert-threat {
+      padding-left: 12px;
+      -webkit-line-clamp: 2;
+      font-size: 15px;
+    }
+
+    .alert-icon-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 36%),
+        rgba(56, 0, 0, 0.46);
+      border-left: 1px solid rgba(255,255,255,0.12);
+      position: relative;
+    }
+
+    .alert-icon-panel::before {
+      content: "ALERT";
+      display: block;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.16em;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    .alert-icon {
+      width: 52px;
+      height: 68px;
+      fill: #fff;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.22));
+    }
+
+    .alert-icon.polygon-icon {
+      width: 78px;
+      height: 78px;
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.98);
+      stroke-width: 2.25;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .alert-icon.tornado-icon {
+      width: 58px;
+      height: 76px;
+    }
+
+    .alert-icon.lightning-icon {
+      width: 50px;
+      height: 70px;
+    }
+
+    .alert-icon.flood-icon {
+      width: 54px;
+      height: 62px;
+    }
+
+    .alert-card.blizzard-warning { --accent: #2f7dff; }
+    .alert-card.blizzard-watch { --accent: #6d8dff; }
+    .alert-card.winter-storm-warning { --accent: #d14cff; }
+    .alert-card.winter-storm-watch { --accent: #8a68ff; }
+    .alert-card.winter-weather-advisory { --accent: #7fb7ff; }
+    .alert-card.ice-storm-warning { --accent: #8ff0ff; }
+    .alert-card.lake-effect-snow-warning { --accent: #56d4ff; }
+
+    #status {
+      display: none;
+      position: fixed;
+      right: 10px;
+      bottom: 8px;
+      max-width: min(600px, calc(100vw - 20px));
+      padding: 7px 9px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.88);
+      color: #15202b;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 1px 8px rgba(0, 0, 0, 0.12);
+      pointer-events: none;
+    }
+
+    #status.visible {
+      display: block;
+    }
+
+    @keyframes alert-in {
+      0% {
+        opacity: 0;
+        transform: translateX(-120px) scale(0.96);
+      }
+      70% {
+        opacity: 1;
+        transform: translateX(12px) scale(1.01);
+      }
+      100% {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+      }
+    }
+
+    @keyframes alert-out {
+      0% {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: translateX(28px) scale(0.98);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div id="stack" aria-live="polite" aria-label="Recent popup alerts"></div>
+  </div>
+  <div id="status">Waiting for TuftsWeather Overlays winter alert stream...</div>
+
+  <template id="cardTemplate">
+    <article class="alert-card">
+      <div class="alert-body">
+        <div class="alert-meta">
+          <span class="alert-action"></span>
+          <span class="alert-event"></span>
+        </div>
+        <div class="alert-bottom">
+          <span class="alert-counties"></span>
+          <span class="alert-threat"></span>
+        </div>
+      </div>
+      <div class="alert-icon-panel" aria-hidden="true">
+        <svg class="alert-icon tornado-icon" viewBox="0 0 64 96">
+          <path d="M9 14h42c3 0 4 4 2 6l-8 8H19c-3 0-4-4-2-6l8-8zm6 20h30c3 0 4 4 2 6l-8 8H25c-3 0-4-4-2-6l8-8zm6 20h24c3 0 4 4 2 6l-8 8H31c-3 0-4-4-2-6l8-8zm6 20h18c3 0 4 4 2 6l-13 13c-2 2-6 1-6-2v-11h-7c-3 0-4-4-2-6l8-8z"></path>
+        </svg>
+      </div>
+    </article>
+  </template>
+
+  <script>
+    const LOCAL_OVERLAYS_WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+    const LOCAL_OVERLAYS_SUBSCRIPTIONS = ["liveAlerts"];
+    const params = new URLSearchParams(window.location.search);
+
+    const stack = document.getElementById("stack");
+    const statusEl = document.getElementById("status");
+    const template = document.getElementById("cardTemplate");
+
+    const zoomLevel = Number(params.get("setElementZoomLevel") || "1");
+    const maxHistoryMinutes = Math.max(0, Number(params.get("setMaxHistory") || "2"));
+    const showWeatherIcon = params.get("setWx") !== "false";
+    const debugStatus = params.get("debug") === "1";
+    const displaySeconds = Math.max(6, Number(params.get("setDisplaySeconds") || "11"));
+    const soundEnabled = params.get("setSound") !== "false";
+    const beepVolume = Math.min(1, Math.max(0, Number(params.get("setBeepVolume") || "0.12")));
+    const alertVolume = Math.min(1, Math.max(0, Number(params.get("setAlertVolume") || "0.18")));
+
+    document.documentElement.style.setProperty("--zoom", String(zoomLevel));
+    if (debugStatus) {
+      statusEl.classList.add("visible");
+    }
+
+    let socket = null;
+    let reconnectTimer = null;
+    let allowQueue = false;
+    let isQueuing = false;
+    let activeEntry = null;
+    let eventQueue = [];
+    let soundChain = Promise.resolve();
+    let streamPrimed = false;
+    const overlayStartedAt = Date.now();
+    const recentHashes = new Map();
+    const recentTrackings = new Map();
+    const MAX_QUEUE_SIZE = 24;
+    const MAX_RECENT_HASHES = 96;
+    const TRACKING_COOLDOWN_MS = Math.max(displaySeconds * 1000, maxHistoryMinutes * 60 * 1000, 180000);
+    const SOUND_BASE = "/assets/sounds/warnings";
+    const SOUND_LIBRARY = {
+      beep: `${SOUND_BASE}/beep-sfx.mp3`,
+      blizzardWarningIssued: `${SOUND_BASE}/blizzard-warning-issued.mp3`,
+      blizzardWarningUpdated: `${SOUND_BASE}/blizzard-warning-updated.mp3`,
+      winterStormWarningIssued: `${SOUND_BASE}/winter-storm-warning-issued.mp3`,
+      winterStormWarningUpdated: `${SOUND_BASE}/winter-storm-warning-updated.mp3`,
+      winterWeatherAdvisoryIssued: `${SOUND_BASE}/winter-weather-advisory-issued.mp3`,
+      winterWeatherAdvisoryUpdated: `${SOUND_BASE}/winter-weather-advisory-updated.mp3`,
+      iceStormWarningIssued: `${SOUND_BASE}/ice-storm-warning-issued.mp3`,
+      iceStormWarningUpdated: `${SOUND_BASE}/ice-storm-warning-updated.mp3`,
+      lakeEffectSnowWarningIssued: `${SOUND_BASE}/lake-effect-snow-warning-issued.mp3`,
+      lakeEffectSnowWarningUpdated: `${SOUND_BASE}/lake-effect-snow-warning-updated.mp3`,
+    };
+
+    function normalize(value) {
+      return String(value || "").toUpperCase().replace(/\s+/g, " ").trim();
+    }
+
+    function getTrackingKey(alert) {
+      const properties = alert && alert.properties ? alert.properties : {};
+      const details = properties && properties.details ? properties.details : (alert && alert.details ? alert.details : {});
+      return String(details.tracking || properties.id || alert.id || properties.hash || "").trim();
+    }
+
+    function getAlertKey(alert) {
+      const properties = alert && alert.properties ? alert.properties : {};
+      const tracking = getTrackingKey(alert);
+      const action = normalize(properties.action_type || properties.messageType || "NEW");
+      const version =
+        String(properties.sent || properties.effective || properties.expires || properties.id || properties.hash || "").trim() ||
+        String(getAlertTimestamp(alert) || 0);
+      return [tracking, action, version].join("|");
+    }
+
+    function getAlertTimestamp(alert) {
+      const properties = alert && alert.properties ? alert.properties : {};
+      const details = properties && properties.details ? properties.details : (alert && alert.details ? alert.details : {});
+      const rawValue = properties.issued || details.issued || properties.sent || properties.effective || "";
+      const parsed = Date.parse(String(rawValue || ""));
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function decodeGeneratedPolygon(generated) {
+      if (!generated) {
+        return null;
+      }
+
+      try {
+        const decoded = atob(String(generated));
+        return JSON.parse(decoded);
+      } catch {
+        return null;
+      }
+    }
+
+    function getLongestRing(candidate) {
+      if (!Array.isArray(candidate)) {
+        return null;
+      }
+
+      if (
+        candidate.length > 2 &&
+        Array.isArray(candidate[0]) &&
+        typeof candidate[0][0] === "number" &&
+        typeof candidate[0][1] === "number"
+      ) {
+        return candidate;
+      }
+
+      let best = null;
+      for (const part of candidate) {
+        const ring = getLongestRing(part);
+        if (ring && (!best || ring.length > best.length)) {
+          best = ring;
+        }
+      }
+
+      return best;
+    }
+
+    function getAlertPolygon(alert) {
+      const properties = alert && alert.properties ? alert.properties : {};
+      const geometry = alert && alert.geometry ? alert.geometry : properties.geometry;
+      const generated = properties?.geocode?.generated;
+      const rawGeometry = properties?.raw?.geometry;
+
+      const directRing = getLongestRing(geometry?.coordinates);
+      if (directRing) {
+        return directRing;
+      }
+
+      const rawRing = getLongestRing(rawGeometry?.coordinates);
+      if (rawRing) {
+        return rawRing;
+      }
+
+      const decoded = decodeGeneratedPolygon(generated);
+      return getLongestRing(decoded);
+    }
+
+    function buildPolygonPath(points, width = 78, height = 78, padding = 6) {
+      if (!Array.isArray(points) || points.length < 3) {
+        return "";
+      }
+
+      const coords = points
+        .filter((point) => Array.isArray(point) && point.length >= 2)
+        .map(([lon, lat]) => ({ x: Number(lon), y: Number(lat) }))
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+
+      if (coords.length < 3) {
+        return "";
+      }
+
+      const xs = coords.map((point) => point.x);
+      const ys = coords.map((point) => point.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const spanX = Math.max(maxX - minX, 0.001);
+      const spanY = Math.max(maxY - minY, 0.001);
+      const scale = Math.min((width - padding * 2) / spanX, (height - padding * 2) / spanY);
+      const offsetX = (width - spanX * scale) / 2;
+      const offsetY = (height - spanY * scale) / 2;
+
+      return coords
+        .map((point, index) => {
+          const x = ((point.x - minX) * scale + offsetX).toFixed(2);
+          const y = (height - ((point.y - minY) * scale + offsetY)).toFixed(2);
+          return `${index === 0 ? "M" : "L"}${x} ${y}`;
+        })
+        .join(" ") + " Z";
+    }
+
+    function dedupeQueue() {
+      const seen = new Set();
+      eventQueue = eventQueue.filter((entry) => {
+        if (!entry || !entry.key || seen.has(entry.key)) {
+          return false;
+        }
+        seen.add(entry.key);
+        return true;
+      });
+    }
+
+    function pruneRecentHashes(now = Date.now()) {
+      for (const [hash, expiresAt] of recentHashes.entries()) {
+        if (expiresAt <= now) {
+          recentHashes.delete(hash);
+        }
+      }
+
+      for (const [tracking, entry] of recentTrackings.entries()) {
+        if (!entry || entry.expiresAt <= now) {
+          recentTrackings.delete(tracking);
+        }
+      }
+
+      while (recentHashes.size > MAX_RECENT_HASHES) {
+        const firstKey = recentHashes.keys().next().value;
+        recentHashes.delete(firstKey);
+      }
+    }
+
+    function classifyAlert(alert) {
+      const properties = alert && alert.properties ? alert.properties : (alert && alert.raw && alert.raw.properties ? alert.raw.properties : {});
+      const details = properties && properties.details ? properties.details : (alert && alert.details ? alert.details : {});
+      const event = normalize(properties.event || details.native);
+      const name = normalize(details.name || properties.properEventName || properties.event);
+      const headline = normalize(properties.headline);
+      const combinedText = `${name} ${event} ${headline}`;
+
+      if (name.includes("BLIZZARD WARNING") || event === "BLIZZARD WARNING" || combinedText.includes("BLIZZARD WARNING")) {
+        return { className: "blizzard-warning", label: "Blizzard Warning" };
+      }
+      if (name.includes("BLIZZARD WATCH") || event === "BLIZZARD WATCH" || combinedText.includes("BLIZZARD WATCH")) {
+        return { className: "blizzard-watch", label: "Blizzard Watch" };
+      }
+      if (name.includes("WINTER STORM WARNING") || event === "WINTER STORM WARNING" || combinedText.includes("WINTER STORM WARNING")) {
+        return { className: "winter-storm-warning", label: "Winter Storm Warning" };
+      }
+      if (name.includes("WINTER STORM WATCH") || event === "WINTER STORM WATCH" || combinedText.includes("WINTER STORM WATCH")) {
+        return { className: "winter-storm-watch", label: "Winter Storm Watch" };
+      }
+      if (name.includes("WINTER WEATHER ADVISORY") || event === "WINTER WEATHER ADVISORY" || combinedText.includes("WINTER WEATHER ADVISORY")) {
+        return { className: "winter-weather-advisory", label: "Winter Weather Advisory" };
+      }
+      if (name.includes("ICE STORM WARNING") || event === "ICE STORM WARNING" || combinedText.includes("ICE STORM WARNING")) {
+        return { className: "ice-storm-warning", label: "Ice Storm Warning" };
+      }
+      if (name.includes("LAKE EFFECT SNOW WARNING") || event === "LAKE EFFECT SNOW WARNING" || combinedText.includes("LAKE EFFECT SNOW WARNING")) {
+        return { className: "lake-effect-snow-warning", label: "Lake Effect Snow Warning" };
+      }
+
+      return null;
+    }
+
+    function shouldUseAlert(alert, batchSentAt = 0) {
+      const action = normalize(alert?.properties?.action_type || alert?.properties?.messageType);
+      if (action === "EXPIRED" || action === "CANCELLED" || action === "CANCELED") {
+        return false;
+      }
+
+      if (!classifyAlert(alert)) {
+        return false;
+      }
+
+      const isIssued = Boolean(alert?.properties?.is_issued);
+      const isUpdated = Boolean(alert?.properties?.is_updated);
+      if (action && action !== "NEW" && action !== "UPDATE" && action !== "UPDATED" && !isIssued && !isUpdated) {
+        return false;
+      }
+
+      const timestamp = getAlertTimestamp(alert) || batchSentAt || 0;
+      if (timestamp > 0 && timestamp < overlayStartedAt - 15000) {
+        return false;
+      }
+
+      if (maxHistoryMinutes > 0 && timestamp > 0) {
+        const ageMs = Date.now() - timestamp;
+        if (ageMs > maxHistoryMinutes * 60 * 1000) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    function getAlertLocations(alert) {
+      const properties = alert && alert.properties ? alert.properties : {};
+      const details = properties && properties.details ? properties.details : (alert && alert.details ? alert.details : {});
+      const event = normalize(properties.event || details.native);
+      const name = normalize(details.name || properties.properEventName || properties.event);
+      const isWatch = event.includes("WATCH") || name.includes("WATCH");
+      const stateSet = new Set();
+      const areaDesc = String(properties.areaDesc || properties.locations || "");
+      const ugcValues = []
+        .concat(Array.isArray(properties?.geocode?.UGC) ? properties.geocode.UGC : [])
+        .concat(Array.isArray(properties?.geocode?.ugc) ? properties.geocode.ugc : []);
+
+      for (const ugc of ugcValues) {
+        const match = String(ugc || "").toUpperCase().match(/^([A-Z]{2})[CZ]/);
+        if (match) {
+          stateSet.add(match[1]);
+        }
+      }
+
+      if (!stateSet.size) {
+        const matches = areaDesc.toUpperCase().match(/,\s*([A-Z]{2})(?=$|\s*[-;])/g) || [];
+        for (const token of matches) {
+          const state = token.replace(",", "").trim();
+          if (/^[A-Z]{2}$/.test(state)) {
+            stateSet.add(state);
+          }
+        }
+      }
+
+      if (isWatch && stateSet.size) {
+        return Array.from(stateSet).join(" - ");
+      }
+
+      return areaDesc
+        .replace(/\s*;\s*/g, " - ")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+        .toUpperCase() || "LOCATION DETAILS PENDING";
+    }
+
+    function getAlertThreatLine(alert) {
+      const properties = alert && alert.properties ? alert.properties : {};
+      const details = properties && properties.details ? properties.details : (alert && alert.details ? alert.details : {});
+      const event = normalize(properties.event || details.native);
+      const name = normalize(details.name || properties.properEventName || properties.event);
+      const combined = normalize([
+        properties.headline,
+        properties.description,
+        details.description,
+        properties.instruction,
+        details.instruction
+      ].filter(Boolean).join(" "));
+      const parts = [];
+      const add = (value) => {
+        const normalized = normalize(value).replace(/\s+\.\s*/g, ". ").trim();
+        if (!normalized || parts.includes(normalized)) {
+          return;
+        }
+        parts.push(normalized);
+      };
+
+      if (event === "BLIZZARD WARNING" || name.includes("BLIZZARD WARNING")) {
+        add("BLIZZARD CONDITIONS EXPECTED.");
+        add("WHITEOUTS POSSIBLE.");
+        add("DANGEROUS TRAVEL LIKELY.");
+      } else if (event === "BLIZZARD WATCH" || name.includes("BLIZZARD WATCH")) {
+        add("BLIZZARD CONDITIONS POSSIBLE.");
+        add("WHITEOUTS POSSIBLE.");
+        add("DANGEROUS TRAVEL POSSIBLE.");
+      } else if (event === "WINTER STORM WARNING" || name.includes("WINTER STORM WARNING")) {
+        add("WINTER STORM CONDITIONS EXPECTED.");
+        add("HAZARDOUS TRAVEL LIKELY.");
+      } else if (event === "WINTER STORM WATCH" || name.includes("WINTER STORM WATCH")) {
+        add("WINTER STORM CONDITIONS POSSIBLE.");
+        add("HAZARDOUS TRAVEL POSSIBLE.");
+      }
+
+      if (/HEAVY SNOW|SNOW/i.test(combined)) add("HEAVY SNOW POSSIBLE.");
+      if (/ICE|ICING|FREEZING RAIN|SLEET/i.test(combined)) add("ICE ACCUMULATION POSSIBLE.");
+      if (/BLOWING SNOW/i.test(combined) && !parts.includes("WHITEOUTS POSSIBLE.")) add("BLOWING SNOW POSSIBLE.");
+      if (/WIND|GUST/i.test(combined) && !/BLIZZARD/.test(combined)) add("STRONG WINDS POSSIBLE.");
+
+      if (parts.length) {
+        return parts.join(" ");
+      }
+
+      return getAlertLocations(alert);
+    }
+
+    function fitTextToBox(element, minFontSize, maxFontSize = null) {
+      if (!element) {
+        return;
+      }
+
+      element.style.fontSize = maxFontSize ? `${maxFontSize}px` : "";
+      let fontSize = Number.parseFloat(window.getComputedStyle(element).fontSize);
+      while (
+        (element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight) &&
+        fontSize > minFontSize
+      ) {
+        fontSize -= 1;
+        element.style.fontSize = `${fontSize}px`;
+      }
+    }
+
+    function getActionPrefix(alert) {
+      const action = normalize(alert?.properties?.action_type);
+      if (action === "UPDATED" || action === "UPDATE") {
+        return "UPDATE";
+      }
+      if (action === "EXPIRED" || action === "CANCELLED" || action === "CANCELED") {
+        return "CLEAR";
+      }
+      return "NEW";
+    }
+
+    function getActionType(alert) {
+      const action = normalize(alert?.properties?.action_type || alert?.properties?.messageType);
+      if (action === "UPDATED" || action === "UPDATE") {
+        return "UPDATED";
+      }
+      if (action === "EXPIRED" || action === "CANCELLED" || action === "CANCELED") {
+        return "CLEAR";
+      }
+      return "NEW";
+    }
+
+    function getAlertSoundUrl(alert, classification) {
+      const actionType = getActionType(alert);
+
+      if (classification?.className === "blizzard-warning" || classification?.className === "blizzard-watch") {
+        return actionType === "UPDATED" ? SOUND_LIBRARY.blizzardWarningUpdated : SOUND_LIBRARY.blizzardWarningIssued;
+      }
+
+      if (classification?.className === "winter-storm-warning" || classification?.className === "winter-storm-watch") {
+        return actionType === "UPDATED" ? SOUND_LIBRARY.winterStormWarningUpdated : SOUND_LIBRARY.winterStormWarningIssued;
+      }
+
+      if (classification?.className === "winter-weather-advisory") {
+        return actionType === "UPDATED" ? SOUND_LIBRARY.winterWeatherAdvisoryUpdated : SOUND_LIBRARY.winterWeatherAdvisoryIssued;
+      }
+
+      if (classification?.className === "ice-storm-warning") {
+        return actionType === "UPDATED" ? SOUND_LIBRARY.iceStormWarningUpdated : SOUND_LIBRARY.iceStormWarningIssued;
+      }
+
+      if (classification?.className === "lake-effect-snow-warning") {
+        return actionType === "UPDATED" ? SOUND_LIBRARY.lakeEffectSnowWarningUpdated : SOUND_LIBRARY.lakeEffectSnowWarningIssued;
+      }
+
+      return "";
+    }
+
+    function playAudioClip(url, volume = 1) {
+      if (!url) {
+        return Promise.resolve();
+      }
+
+      const audio = new Audio(url);
+      audio.preload = "auto";
+      audio.volume = volume;
+
+      return new Promise((resolve) => {
+        const cleanup = () => {
+          audio.removeEventListener("ended", handleDone);
+          audio.removeEventListener("error", handleDone);
+        };
+
+        const handleDone = () => {
+          cleanup();
+          resolve();
+        };
+
+        audio.addEventListener("ended", handleDone, { once: true });
+        audio.addEventListener("error", handleDone, { once: true });
+
+        audio.play().catch(() => {
+          cleanup();
+          resolve();
+        });
+      });
+    }
+
+    function playAlertSound(alert, classification) {
+      if (!soundEnabled) {
+        return;
+      }
+
+      const alertSoundUrl = getAlertSoundUrl(alert, classification);
+      if (!alertSoundUrl) {
+        return;
+      }
+
+      soundChain = soundChain
+        .then(() => playAudioClip(SOUND_LIBRARY.beep, beepVolume))
+        .then(() => playAudioClip(alertSoundUrl, alertVolume))
+        .catch(() => {});
+    }
+
+    function dismissAlert(entry) {
+      if (!entry || !entry.element || entry.closing) {
+        return;
+      }
+
+      entry.closing = true;
+      entry.element.classList.add("exiting");
+      window.setTimeout(() => {
+        if (activeEntry === entry) {
+          activeEntry = null;
+        }
+        entry.element.remove();
+        isQueuing = false;
+        syncQueue();
+      }, 280);
+    }
+
+    function renderAlert(alert) {
+      const classification = classifyAlert(alert);
+      if (!classification) {
+        return;
+      }
+
+      const item = template.content.firstElementChild.cloneNode(true);
+      item.classList.add(classification.className);
+      if (!showWeatherIcon) {
+        item.querySelector(".alert-icon-panel").style.display = "none";
+        item.style.gridTemplateColumns = "1fr";
+      }
+
+      const iconPanel = item.querySelector(".alert-icon-panel");
+      const icon = item.querySelector(".alert-icon");
+      const polygon = getAlertPolygon(alert);
+      const polygonPath = buildPolygonPath(polygon);
+
+      if (polygonPath) {
+        icon.classList.remove("tornado-icon", "lightning-icon", "flood-icon");
+        icon.classList.add("polygon-icon");
+        icon.setAttribute("viewBox", "0 0 78 78");
+        icon.innerHTML = `<path d="${polygonPath}"></path>`;
+      } else {
+        icon.classList.remove("polygon-icon", "lightning-icon", "flood-icon", "tornado-icon");
+        icon.setAttribute("viewBox", "0 0 64 64");
+        icon.innerHTML = '<path d="M31 6h2v14l9-9 2 2-9 9h14v2H35l9 9-2 2-9-9v14h-2V26l-9 9-2-2 9-9H15v-2h14l-9-9 2-2 9 9z"></path>';
+        iconPanel.style.background = "";
+      }
+
+      item.querySelector(".alert-action").textContent = getActionPrefix(alert);
+      item.querySelector(".alert-event").textContent = classification.label;
+      item.querySelector(".alert-counties").textContent = getAlertLocations(alert);
+      item.querySelector(".alert-threat").textContent = getAlertThreatLine(alert);
+
+      stack.replaceChildren(item);
+      activeEntry = {
+        key: getAlertKey(alert),
+        tracking: getTrackingKey(alert),
+        element: item,
+        closing: false
+      };
+
+      fitTextToBox(item.querySelector(".alert-event"), 19, 30);
+      fitTextToBox(item.querySelector(".alert-counties"), 12, 18);
+      fitTextToBox(item.querySelector(".alert-threat"), 11, 15);
+      playAlertSound(alert, classification);
+      window.setTimeout(() => dismissAlert(activeEntry), displaySeconds * 1000);
+    }
+
+    function enqueueAlerts(alerts, batchSentAt = 0) {
+      const now = Date.now();
+      pruneRecentHashes(now);
+
+      for (const alert of alerts) {
+        if (!shouldUseAlert(alert, batchSentAt)) {
+          continue;
+        }
+
+        const key = getAlertKey(alert);
+        const tracking = getTrackingKey(alert);
+        if (!key || !tracking) {
+          continue;
+        }
+
+        const recentTracking = recentTrackings.get(tracking);
+        if (recentTracking && recentTracking.versionKey === key) {
+          continue;
+        }
+
+        const actionType = getActionType(alert);
+        const versionTimestamp = getAlertTimestamp(alert) || batchSentAt || now;
+        if (recentTracking) {
+          const sameAction = recentTracking.actionType === actionType;
+          const nearSameVersion = Math.abs((recentTracking.versionTimestamp || 0) - versionTimestamp) < 30000;
+          if ((sameAction && nearSameVersion) || (sameAction && actionType === "NEW")) {
+            continue;
+          }
+        }
+
+        if (
+          recentHashes.has(key) ||
+          eventQueue.some((entry) => entry.key === key || entry.tracking === tracking) ||
+          (activeEntry && (activeEntry.key === key || activeEntry.tracking === tracking))
+        ) {
+          continue;
+        }
+
+        recentHashes.set(key, now + Math.max(displaySeconds * 1000, maxHistoryMinutes * 60 * 1000, 120000));
+        recentTrackings.set(tracking, {
+          versionKey: key,
+          versionTimestamp,
+          actionType,
+          expiresAt: now + TRACKING_COOLDOWN_MS
+        });
+        eventQueue.push({
+          key,
+          tracking,
+          issued: getAlertTimestamp(alert) || batchSentAt || now,
+          feature: alert
+        });
+      }
+
+      dedupeQueue();
+      eventQueue = eventQueue
+        .sort((a, b) => b.issued - a.issued)
+        .slice(0, MAX_QUEUE_SIZE);
+    }
+
+    function markAlertsAsSeen(alerts) {
+      const now = Date.now();
+      pruneRecentHashes(now);
+
+      for (const alert of Array.isArray(alerts) ? alerts : []) {
+        if (!classifyAlert(alert)) {
+          continue;
+        }
+
+        const key = getAlertKey(alert);
+        const tracking = getTrackingKey(alert);
+        if (!key || !tracking) {
+          continue;
+        }
+
+        const expiresAt = now + TRACKING_COOLDOWN_MS;
+        recentHashes.set(key, expiresAt);
+        recentTrackings.set(tracking, {
+          versionKey: key,
+          versionTimestamp: getAlertTimestamp(alert) || now,
+          actionType: getActionType(alert),
+          expiresAt
+        });
+      }
+    }
+
+    function isLikelyBackfillBatch(alerts, batchSentAt = 0) {
+      const list = Array.isArray(alerts) ? alerts : [];
+      if (!list.length) {
+        return false;
+      }
+
+      if (list.length > 1 && batchSentAt >= overlayStartedAt - 10000) {
+        return true;
+      }
+
+      return list.some((alert) => {
+        const timestamp = getAlertTimestamp(alert);
+        return timestamp > 0 && timestamp < overlayStartedAt - 30000;
+      });
+    }
+
+    function syncQueue() {
+      if (isQueuing || !allowQueue || eventQueue.length === 0) {
+        return;
+      }
+
+      const next = eventQueue.shift();
+      if (!next) {
+        return;
+      }
+
+      isQueuing = true;
+      renderAlert(next.feature);
+    }
+
+    function handleSocketMessage(raw) {
+      let data;
+
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        return;
+      }
+
+      if (data.type === "status" && data.message && typeof data.message === "object") {
+        const mode = String(data.message.mode || "unknown");
+        const connected = Boolean(data.message.connected);
+        allowQueue = mode === "nwws-live" && connected;
+        statusEl.textContent = `TuftsWeather Overlays ${mode} (${connected ? "connected" : "offline"})`;
+        return;
+      }
+
+      if (data.type === "subscribe" && data.value === "liveAlerts" && data.message && Array.isArray(data.message.alerts)) {
+        const source = normalize(data.message.source || "");
+        const isTestSource = source === "TEST";
+        if (source && !source.includes("NWWS") && !isTestSource) {
+          return;
+        }
+
+        const batchSentAt = Date.parse(String(data.message.sentAt || "")) || 0;
+        if (isTestSource) {
+          allowQueue = true;
+        }
+
+        if (!isTestSource && !streamPrimed && isLikelyBackfillBatch(data.message.alerts, batchSentAt)) {
+          streamPrimed = true;
+          markAlertsAsSeen(data.message.alerts);
+          eventQueue = [];
+          statusEl.textContent = "NWWS live - primed, waiting for new or updated alerts";
+          return;
+        }
+
+        streamPrimed = true;
+        enqueueAlerts(data.message.alerts, batchSentAt);
+        statusEl.textContent = `${isTestSource ? "Test alert" : (allowQueue ? "NWWS live" : "Waiting for NWWS")} - ${eventQueue.length} queued`;
+        syncQueue();
+      }
+    }
+
+    function connectLocalOverlays() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      socket = new WebSocket(LOCAL_OVERLAYS_WS_URL);
+      statusEl.textContent = "Connecting to TuftsWeather Overlays alert stream...";
+
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({
+          type: "subscribe",
+          message: LOCAL_OVERLAYS_SUBSCRIPTIONS
+        }));
+      });
+
+      socket.addEventListener("message", (event) => {
+        handleSocketMessage(event.data);
+      });
+
+      socket.addEventListener("close", () => {
+        socket = null;
+        statusEl.textContent = "TuftsWeather Overlays websocket disconnected.";
+        scheduleReconnect();
+      });
+
+      socket.addEventListener("error", () => {
+        statusEl.textContent = "TuftsWeather Overlays websocket unavailable.";
+      });
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer) {
+        return;
+      }
+
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connectLocalOverlays();
+      }, 1000);
+    }
+
+    connectLocalOverlays();
+  </script>
+</body>
+</html>

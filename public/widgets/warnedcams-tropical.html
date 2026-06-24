@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TuftsWeather Overlays Tropical Cameras</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest" defer></script>
+  <style>
+    :root {
+      --overlay-top: 22px;
+      --overlay-width: min(84vw, 1120px);
+      --overlay-primary: #1560ad;
+      --overlay-secondary: #0b3970;
+      --overlay-radius: 14px;
+      --overlay-border: rgba(255, 255, 255, 0.18);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #fff;
+    }
+    .root { position: fixed; inset: 0; background: #000; }
+    #video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+      opacity: 0;
+      transition: opacity 0.45s ease;
+    }
+    .top-pill {
+      position: absolute;
+      top: var(--overlay-top);
+      left: 50%;
+      transform: translateX(-50%);
+      width: var(--overlay-width);
+      max-width: calc(100vw - 32px);
+      min-height: 62px;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--overlay-radius);
+      border: 2px solid var(--overlay-border);
+      background: linear-gradient(135deg, var(--overlay-primary), var(--overlay-secondary));
+      box-shadow: 0 16px 46px rgba(0, 0, 0, 0.42);
+      z-index: 5;
+      text-align: center;
+    }
+    .top-pill.hidden, .status.hidden { display: none !important; }
+    .top-pill__content {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      width: 100%;
+    }
+    .top-pill__warning {
+      font-size: clamp(18px, 2.4vw, 38px);
+      font-weight: 900;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    .top-pill__divider {
+      font-size: clamp(16px, 1.6vw, 28px);
+      font-weight: 700;
+      opacity: 0.82;
+    }
+    .top-pill__location {
+      font-size: clamp(17px, 2.1vw, 34px);
+      font-weight: 900;
+      line-height: 1.05;
+      text-transform: uppercase;
+    }
+    .status {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 4;
+      pointer-events: none;
+    }
+    .status__box {
+      max-width: min(72vw, 920px);
+      padding: 14px 20px;
+      border-radius: var(--overlay-radius);
+      background: rgba(14, 14, 18, 0.84);
+      border: 2px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.44);
+      font-size: clamp(18px, 2.4vw, 34px);
+      font-weight: 800;
+      text-align: center;
+    }
+    .watermark {
+      position: absolute;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      max-width: calc(100vw - 16px);
+      color: rgba(255, 255, 255, 0.4);
+      font-size: clamp(10px, 0.95vw, 18px);
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      z-index: 5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="top-pill hidden" id="topPill">
+      <div class="top-pill__content">
+        <span class="top-pill__warning" id="warningText">Atlantic Tropical System</span>
+        <span class="top-pill__divider">|</span>
+        <span class="top-pill__location" id="locationText">Nearest Camera</span>
+      </div>
+    </div>
+    <div class="status" id="status">
+      <div class="status__box" id="statusText">Checking cameras near active Atlantic tropical systems...</div>
+    </div>
+    <div class="watermark">NOT FOR BROADCAST - REQUIRES PERMISSION FROM OWNER</div>
+  </div>
+
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      const params = new URLSearchParams(window.location.search);
+      const elements = {
+        video: document.getElementById("video"),
+        topPill: document.getElementById("topPill"),
+        warningText: document.getElementById("warningText"),
+        locationText: document.getElementById("locationText"),
+        status: document.getElementById("status"),
+        statusText: document.getElementById("statusText"),
+      };
+
+      const settings = {
+        refreshTime: Math.max(10, Number(params.get("setRefreshTime") || "60")),
+        rotationTime: Math.max(8, Number(params.get("setRotationTime") || "20")),
+        cameraDataUrl: params.get("setCameraDataUrl") || "/api/cameras-lite",
+        search: params.get("setSearch") || "",
+        streamSource: (params.get("setStreamSource") || "*").toLowerCase(),
+        maxDistanceMiles: Math.max(25, Number(params.get("setMaxDistanceMiles") || "175")),
+        streamMuted: (params.get("setStreamMuted") || "true") !== "false",
+        streamBufferDelay: Math.max(1, Number(params.get("setStreamBufferDelay") || "2")),
+      };
+
+      const FEED_URLS = [
+        "https://www.nhc.noaa.gov/CurrentStorms.json",
+        "https://api.allorigins.win/raw?url=" + encodeURIComponent("https://www.nhc.noaa.gov/CurrentStorms.json"),
+        "https://api.allorigins.win/get?url=" + encodeURIComponent("https://www.nhc.noaa.gov/CurrentStorms.json")
+      ];
+
+      const state = {
+        cameras: [],
+        matches: [],
+        currentIndex: -1,
+        currentStreamUrl: "",
+        currentSignature: "",
+        failedStreamUrls: new Set(),
+        rotationTimer: null,
+        refreshTimer: null,
+        connectTimeout: null,
+        hls: null,
+      };
+
+      function normalize(value) {
+        return String(value || "").toUpperCase().replace(/\s+/g, " ").trim();
+      }
+
+      function cleanText(value) {
+        return String(value || "").replace(/\s+/g, " ").trim();
+      }
+
+      function isAtlanticStorm(storm) {
+        const binNumber = String(storm?.binNumber || "").toUpperCase();
+        const id = String(storm?.id || "").toLowerCase();
+        return binNumber.startsWith("AT") || id.startsWith("al");
+      }
+
+      function classifyStorm(storm) {
+        const classification = String(storm?.classification || "").toUpperCase();
+        const intensity = Number.parseInt(storm?.intensity, 10);
+        if (classification === "TS" || classification === "SS" || classification === "STS") {
+          return { label: "Tropical Storm", primary: "#4f7fe8", secondary: "#2955ad", rank: 2 };
+        }
+        if (classification === "HU") {
+          if (intensity >= 137) return { label: "Category 5 Hurricane", primary: "#d3212d", secondary: "#8d1620", rank: 7 };
+          if (intensity >= 113) return { label: "Category 4 Hurricane", primary: "#ff4020", secondary: "#ab2a11", rank: 6 };
+          if (intensity >= 96) return { label: "Category 3 Hurricane", primary: "#ff7c21", secondary: "#aa4d0f", rank: 5 };
+          if (intensity >= 83) return { label: "Category 2 Hurricane", primary: "#f1b300", secondary: "#a17700", rank: 4 };
+          return { label: "Category 1 Hurricane", primary: "#f2dc00", secondary: "#9f9200", rank: 3 };
+        }
+        if (classification === "TD" || classification === "STD") {
+          return { label: "Tropical Depression", primary: "#3f67a6", secondary: "#253e6c", rank: 1 };
+        }
+        return null;
+      }
+
+      function firstValue(values) {
+        for (const value of values) {
+          if (typeof value === "string" && value.trim()) return value.trim();
+          if (value !== null && value !== undefined && typeof value !== "object") return String(value).trim();
+        }
+        return "";
+      }
+
+      function firstUrl(values) {
+        function pick(value) {
+          if (!value) return "";
+          if (typeof value === "string") return value.trim();
+          if (typeof value !== "object") return String(value).trim();
+          const candidates = [
+            value.url, value.hls, value.hlsUrl, value.m3u8, value.m3u8Url, value.m3u8_url,
+            value.videoUrl, value.video_url, value.stream_url, value.streamUrl, value.playbackUrl, value.src,
+          ];
+          for (const candidate of candidates) {
+            if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+          }
+          return "";
+        }
+        return values.map(pick).find(Boolean) || "";
+      }
+
+      function isLikelyVideo(url) {
+        const value = String(url || "").toLowerCase();
+        return value.includes(".m3u8") || value.includes("/playlist") || value.includes("/manifest");
+      }
+
+      function normalizeCamera(feature) {
+        const props = feature?.properties ?? {};
+        const [lon, lat] = feature?.geometry?.coordinates ?? [];
+        if (!Number.isFinite(Number(lon)) || !Number.isFinite(Number(lat))) return null;
+        const streamUrl = firstUrl([
+          props.hls_url, props.streamingURL, props.streamingVideoURL, props.m3u8Url,
+          props.m3u8_url, props.m3u8, props.url2, props.URL2, props.hls_stream_protected,
+          props.streamSrc, props.httpsVideoUrl, props.httpVideoUrl, props.https_url,
+          props.ios_url, props.stream_url, props.video_url, props.videoUrl, props.url,
+        ]);
+        if (!isLikelyVideo(streamUrl)) return null;
+        return {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [Number(lon), Number(lat)] },
+          properties: {
+            cameraId: firstValue([props.cameraId, props.camera_id, props.id, feature.id, streamUrl]),
+            name: firstValue([props.cameraName, props.camera_title, props.name, props.title, props.description]) || "Traffic Camera",
+            location: firstValue([props.location, props.city, props.county, props.state, props.directionLabel, props.source, "TRAFFIC CAMERA"]),
+            source: firstValue([props.source, props.provider, props.sourceType, "traffic-cameras"]),
+            stream_url: streamUrl,
+          },
+        };
+      }
+
+      function haversineMiles(lat1, lon1, lat2, lon2) {
+        const toRad = (value) => (value * Math.PI) / 180;
+        const earthRadiusMiles = 3958.8;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+        return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+
+      async function fetchStormData() {
+        let lastError = "Unknown fetch failure";
+        for (const url of FEED_URLS) {
+          try {
+            const response = await fetch(url, { cache: "no-store" });
+            if (!response.ok) {
+              lastError = "HTTP " + response.status;
+              continue;
+            }
+            const text = await response.text();
+            let payload = JSON.parse(text);
+            if (payload && typeof payload.contents === "string") {
+              payload = JSON.parse(payload.contents);
+            }
+            if (payload && Array.isArray(payload.activeStorms)) {
+              return payload.activeStorms;
+            }
+            lastError = "Unexpected CurrentStorms payload";
+          } catch (error) {
+            lastError = error?.message || String(error);
+          }
+        }
+        throw new Error(lastError);
+      }
+
+      async function loadTrafficCameras() {
+        elements.statusText.textContent = "Loading traffic cameras...";
+        const response = await fetch(settings.cameraDataUrl, { cache: "force-cache" });
+        if (!response.ok) throw new Error(`Camera data HTTP ${response.status}`);
+        const data = await response.json();
+        const features = Array.isArray(data?.features) ? data.features : [];
+        state.cameras = features.map(normalizeCamera).filter(Boolean);
+      }
+
+      function clearCurrentStream() {
+        clearTimeout(state.connectTimeout);
+        if (state.hls) {
+          state.hls.destroy();
+          state.hls = null;
+        }
+        state.currentStreamUrl = "";
+        elements.video.pause();
+        elements.video.removeAttribute("src");
+        elements.video.load();
+        elements.video.style.opacity = "0";
+      }
+
+      function updateOverlay(match, message = "No cameras near active Atlantic tropical systems right now") {
+        if (!match) {
+          clearCurrentStream();
+          elements.topPill.classList.add("hidden");
+          elements.status.classList.remove("hidden");
+          elements.statusText.textContent = message;
+          return;
+        }
+        document.documentElement.style.setProperty("--overlay-primary", match.theme.primary);
+        document.documentElement.style.setProperty("--overlay-secondary", match.theme.secondary);
+        elements.warningText.textContent = match.title;
+        elements.locationText.textContent = `${String(match.stream.properties.name || "CAMERA").toUpperCase()} - ${Math.round(match.distanceMiles)} MI`;
+        elements.topPill.classList.remove("hidden");
+        elements.status.classList.add("hidden");
+      }
+
+      function getMatches(storms) {
+        const filteredStorms = storms
+          .filter(isAtlanticStorm)
+          .map((storm) => {
+            const theme = classifyStorm(storm);
+            const lat = Number(storm?.latitude_numeric);
+            const lon = Number(storm?.longitude_numeric);
+            if (!theme || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            return {
+              storm,
+              theme,
+              lat,
+              lon,
+              title: `${theme.label} ${cleanText(storm?.name || storm?.id || "UNNAMED")}`.toUpperCase(),
+            };
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.theme.rank - a.theme.rank);
+
+        const filteredStreams = state.cameras.filter((stream) => {
+          if (settings.streamSource !== "*" && String(stream.properties.source || "").toLowerCase() !== settings.streamSource) {
+            return false;
+          }
+          if (settings.search) {
+            const haystack = `${stream.properties.name} ${stream.properties.location} ${stream.properties.source}`.toLowerCase();
+            if (!haystack.includes(settings.search.toLowerCase())) return false;
+          }
+          return true;
+        });
+
+        const matches = [];
+        for (const system of filteredStorms) {
+          const nearby = filteredStreams
+            .map((stream) => {
+              const [lon, lat] = stream.geometry.coordinates;
+              const distanceMiles = haversineMiles(system.lat, system.lon, lat, lon);
+              return { stream, distanceMiles, ...system };
+            })
+            .filter((entry) => entry.distanceMiles <= settings.maxDistanceMiles)
+            .sort((a, b) => a.distanceMiles - b.distanceMiles)
+            .slice(0, 6);
+          matches.push(...nearby);
+        }
+
+        return matches;
+      }
+
+      async function loadStream(match) {
+        const url = match?.stream?.properties?.stream_url;
+        if (!url) {
+          updateOverlay(null);
+          return;
+        }
+        updateOverlay(match);
+        if (state.currentStreamUrl === url) return;
+        state.currentStreamUrl = url;
+        elements.video.style.opacity = "0";
+        clearTimeout(state.connectTimeout);
+        if (state.hls) {
+          state.hls.destroy();
+          state.hls = null;
+        }
+        if (typeof Hls === "undefined") {
+          state.failedStreamUrls.add(url);
+          rotateToNext(true);
+          return;
+        }
+        const hls = new Hls({
+          maxBufferLength: 15,
+          maxMaxBufferLength: 30,
+          liveSyncDurationCount: settings.streamBufferDelay,
+          liveMaxLatencyDurationCount: 3,
+          backBufferLength: 10,
+          lowLatencyMode: false,
+        });
+        state.hls = hls;
+        hls.attachMedia(elements.video);
+        hls.loadSource(url);
+        state.connectTimeout = setTimeout(() => {
+          if (state.currentStreamUrl === url && getComputedStyle(elements.video).opacity === "0") {
+            state.failedStreamUrls.add(url);
+            rotateToNext(true);
+          }
+        }, 8000);
+        hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+          try {
+            clearTimeout(state.connectTimeout);
+            state.failedStreamUrls.delete(url);
+            elements.video.muted = settings.streamMuted;
+            await elements.video.play();
+            elements.video.style.opacity = "1";
+          } catch {
+            state.failedStreamUrls.add(url);
+            rotateToNext(true);
+          }
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data?.fatal) return;
+          clearTimeout(state.connectTimeout);
+          state.failedStreamUrls.add(url);
+          rotateToNext(true);
+        });
+      }
+
+      function rotateToNext(skipFailed = false) {
+        if (!state.matches.length) {
+          state.currentIndex = -1;
+          updateOverlay(null, "No cameras near active Atlantic tropical systems right now");
+          return;
+        }
+        const total = state.matches.length;
+        for (let offset = 1; offset <= total; offset += 1) {
+          const nextIndex = (state.currentIndex + offset + total) % total;
+          const nextMatch = state.matches[nextIndex];
+          const nextUrl = nextMatch?.stream?.properties?.stream_url;
+          if (skipFailed && nextUrl && state.failedStreamUrls.has(nextUrl)) continue;
+          state.currentIndex = nextIndex;
+          loadStream(nextMatch);
+          return;
+        }
+        state.currentIndex = -1;
+        updateOverlay(null, "No working tropical cameras right now");
+      }
+
+      async function syncMatches() {
+        try {
+          const storms = await fetchStormData();
+          const nextSignature = storms
+            .filter(isAtlanticStorm)
+            .map((storm) => `${storm?.id || ""}|${storm?.lastUpdate || ""}|${storm?.publicAdvisory?.advNum || ""}`)
+            .join("||");
+          if (nextSignature === state.currentSignature && state.matches.length) return;
+          state.currentSignature = nextSignature;
+          const previousUrl = state.matches[state.currentIndex]?.stream?.properties?.stream_url || "";
+          state.matches = getMatches(storms);
+          const activeUrls = new Set(state.matches.map((match) => match?.stream?.properties?.stream_url).filter(Boolean));
+          state.failedStreamUrls.forEach((url) => {
+            if (!activeUrls.has(url)) state.failedStreamUrls.delete(url);
+          });
+          if (!state.matches.length) {
+            state.currentIndex = -1;
+            updateOverlay(null, "No cameras near active Atlantic tropical systems right now");
+            return;
+          }
+          const matchingIndex = state.matches.findIndex((match) => match.stream.properties.stream_url === previousUrl);
+          state.currentIndex = matchingIndex >= 0 ? matchingIndex : -1;
+          if (state.currentIndex === -1) rotateToNext(true);
+          else loadStream(state.matches[state.currentIndex]);
+        } catch (error) {
+          updateOverlay(null, error instanceof Error ? error.message : "Tropical cameras failed to load");
+        }
+      }
+
+      function startRotationLoop() {
+        if (state.rotationTimer) clearInterval(state.rotationTimer);
+        state.rotationTimer = setInterval(() => {
+          if (state.matches.length) rotateToNext(true);
+        }, settings.rotationTime * 1000);
+      }
+
+      loadTrafficCameras()
+        .then(() => {
+          syncMatches();
+          startRotationLoop();
+          state.refreshTimer = setInterval(syncMatches, settings.refreshTime * 1000);
+        })
+        .catch((error) => {
+          updateOverlay(null, error instanceof Error ? error.message : "Tropical cameras failed to start");
+        });
+    });
+  </script>
+</body>
+</html>

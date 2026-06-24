@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NWS Warning Outline</title>
+  <style>
+    :root {
+      --canvas-width: 1920px;
+      --canvas-height: 1080px;
+      --outline-width: 6px;
+      --no-warning-blue: #006fd6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      overflow: hidden;
+      background: transparent;
+    }
+
+    #outlineLayer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      pointer-events: none;
+    }
+
+    .outline-box {
+      position: fixed;
+      border: var(--outline-width) solid var(--no-warning-blue);
+      pointer-events: none;
+    }
+
+    .outline-edge {
+      position: fixed;
+      background: var(--no-warning-blue);
+      pointer-events: none;
+    }
+
+    .top-banner {
+      left: 0;
+      top: 0;
+      width: 1502px;
+      height: 106px;
+    }
+
+    .live-left-edge {
+      left: 0;
+      top: 106px;
+      width: var(--outline-width);
+      height: 84px;
+    }
+
+    .left-edge {
+      left: 0;
+      top: 184px;
+      width: var(--outline-width);
+      height: 771px;
+    }
+
+    .left-column-bottom-edge {
+      left: 0;
+      top: 952px;
+      width: 132px;
+      height: var(--outline-width);
+    }
+
+    .webcam-box {
+      left: 1500px;
+      top: 0;
+      width: 420px;
+      height: 408px;
+    }
+
+    .logo-box {
+      left: 1500px;
+      top: 408px;
+      width: 420px;
+      height: 179px;
+    }
+
+    .warning-counter-box {
+      left: 1500px;
+      top: 587px;
+      width: 420px;
+      height: 150px;
+    }
+
+    .radar-box {
+      left: 1463px;
+      top: 737px;
+      width: 457px;
+      height: 343px;
+    }
+
+    .date-box {
+      left: 0;
+      top: 952px;
+      width: 504px;
+      height: 47px;
+    }
+
+    .ticker-label-box {
+      left: 0;
+      top: 999px;
+      width: 504px;
+      height: 81px;
+    }
+
+    .ticker-top-box {
+      left: 504px;
+      top: 952px;
+      width: 959px;
+      height: 47px;
+    }
+
+    .ticker-bottom-box {
+      left: 504px;
+      top: 999px;
+      width: 959px;
+      height: 81px;
+    }
+
+    #status {
+      display: none;
+      position: fixed;
+      right: 10px;
+      bottom: 8px;
+      padding: 7px 9px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.9);
+      color: #15202b;
+      font: 12px/1.35 Arial, sans-serif;
+    }
+
+    #status.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+    <div id="outlineLayer" aria-label="Current warning outlines">
+    <div class="outline-box top-banner"></div>
+    <div class="outline-edge live-left-edge"></div>
+    <div class="outline-edge left-edge"></div>
+    <div class="outline-edge left-column-bottom-edge"></div>
+    <div class="outline-box webcam-box"></div>
+    <div class="outline-box logo-box"></div>
+    <div class="outline-box warning-counter-box"></div>
+    <div class="outline-box radar-box"></div>
+    <div class="outline-box date-box"></div>
+    <div class="outline-box ticker-label-box"></div>
+    <div class="outline-box ticker-top-box"></div>
+    <div class="outline-box ticker-bottom-box"></div>
+  </div>
+  <div id="status">Checking NWS alerts...</div>
+
+  <script>
+    const LOCAL_OVERLAYS_WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+    const LOCAL_OVERLAYS_SUBSCRIPTIONS = ["summary"];
+
+    const LEVELS = [
+      { key: "severe-thunderstorm-watch", rank: 20, label: "Severe Thunderstorm Watch", color: "#e47b8f" },
+      { key: "severe-thunderstorm", rank: 30, label: "Severe Thunderstorm Warning", color: "#d4ad00" },
+      { key: "considerable-severe-thunderstorm", rank: 40, label: "Considerable Severe Thunderstorm Warning", color: "#b38300" },
+      { key: "destructive-severe-thunderstorm", rank: 45, label: "Destructive Severe Thunderstorm Warning", color: "#966000" },
+      { key: "eds-severe-thunderstorm", rank: 50, label: "EDS Severe Thunderstorm Warning", color: "#8a5400" },
+      { key: "tornado-watch", rank: 60, label: "Tornado Watch", color: "#ff0000" },
+      { key: "radar-indicated-tornado-warning", rank: 70, label: "Radar Indicated Tornado Warning", color: "#d10000" },
+      { key: "tornado-observed", rank: 80, label: "Observed Tornado Warning", color: "#a40000" },
+      { key: "pds-tornado", rank: 90, label: "PDS Tornado Warning", color: "#7c3aed" },
+      { key: "tornado-emergency", rank: 100, label: "Tornado Emergency", color: "#ff1493" }
+    ];
+
+    const levelByKey = Object.fromEntries(LEVELS.map((level) => [level.key, level]));
+    const params = new URLSearchParams(window.location.search);
+
+    const outlineBoxes = Array.from(document.querySelectorAll(".outline-box"));
+    const outlineEdges = Array.from(document.querySelectorAll(".outline-edge"));
+    const statusEl = document.getElementById("status");
+    let socket = null;
+    let currentSummary = {
+      activeCount: 0,
+      highestKey: "",
+      highestLabel: "No severe alerts active currently",
+      highestColor: "#006fd6",
+    };
+    let reconnectTimer = null;
+
+    if (params.get("debug") === "1") {
+      statusEl.classList.add("visible");
+    }
+
+    function connectLocalOverlays() {
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      statusEl.textContent = "Connecting to TuftsWeather Overlays alerts...";
+      socket = new WebSocket(LOCAL_OVERLAYS_WS_URL);
+
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({
+          type: "subscribe",
+          message: LOCAL_OVERLAYS_SUBSCRIPTIONS
+        }));
+      });
+
+      socket.addEventListener("message", (event) => {
+        handleSocketMessage(event.data);
+      });
+
+      socket.addEventListener("close", () => {
+        socket = null;
+        renderSummary(currentSummary, "TuftsWeather Overlays websocket disconnected");
+        scheduleReconnect();
+      });
+
+      socket.addEventListener("error", () => {
+        renderSummary(currentSummary, "TuftsWeather Overlays websocket unavailable");
+      });
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer) {
+        return;
+      }
+
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connectLocalOverlays();
+      }, 1000);
+    }
+
+    function handleSocketMessage(raw) {
+      let data;
+
+      try {
+        data = JSON.parse(raw);
+      } catch (error) {
+        return;
+      }
+
+      if (data.type === "subscribe" && data.value === "summary" && data.message) {
+        currentSummary = data.message || currentSummary;
+        renderSummary(currentSummary);
+        return;
+      }
+
+      if (data.type === "update" && data.message && typeof data.message === "object" && data.message.summary) {
+        currentSummary = data.message.summary;
+        renderSummary(currentSummary);
+      }
+    }
+    function renderSummary(summary, errorMessage = "") {
+      const now = new Date();
+      const level = levelByKey[summary?.highestKey || ""];
+      const active = summary && summary.highestKey
+        ? { label: level?.label || summary.highestLabel, color: level?.color || summary.highestColor }
+        : { label: "No severe alerts active currently", color: "#006fd6" };
+
+      for (const box of outlineBoxes) {
+        box.style.borderColor = active.color;
+      }
+      for (const edge of outlineEdges) {
+        edge.style.background = active.color;
+      }
+
+      statusEl.textContent = errorMessage
+        ? `${errorMessage}. Showing blue outline. Last checked ${now.toLocaleTimeString()}.`
+        : `${active.label} outline active from ${summary?.activeCount || 0} active TuftsWeather Overlays alert(s). Last checked ${now.toLocaleTimeString()}.`;
+    }
+
+    connectLocalOverlays();
+  </script>
+</body>
+</html>

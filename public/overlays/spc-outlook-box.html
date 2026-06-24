@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPC Outlook Box</title>
+  <style>
+    :root {
+      --canvas-width: 1920px;
+      --canvas-height: 1080px;
+      --zoom: 1;
+      --accent: #d10000;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      overflow: hidden;
+      background: transparent;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      transform-origin: top left;
+      transform: scale(var(--zoom));
+    }
+
+    #outlookBox {
+      position: fixed;
+      left: 28px;
+      top: 180px;
+      width: 560px;
+      min-height: 230px;
+      padding: 16px 18px 18px;
+      border: 3px solid var(--accent);
+      background: rgba(0, 0, 0, 0.72);
+      box-shadow: 0 16px 38px rgba(0, 0, 0, 0.44);
+      color: #ffffff;
+      text-transform: uppercase;
+      overflow: hidden;
+    }
+
+    .text-3d {
+      text-shadow:
+        -1px -1px 0 rgba(0, 0, 0, 0.84),
+        1px -1px 0 rgba(0, 0, 0, 0.84),
+        -1px 1px 0 rgba(0, 0, 0, 0.84),
+        1px 1px 0 rgba(0, 0, 0, 0.84),
+        0 3px 0 rgba(0, 0, 0, 0.5);
+    }
+
+    .topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding-bottom: 11px;
+      border-bottom: 2px solid rgba(255, 255, 255, 0.16);
+    }
+
+    .day {
+      font-size: 34px;
+      font-weight: 950;
+      line-height: 1;
+    }
+
+    .type {
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      white-space: nowrap;
+    }
+
+    .headline {
+      margin-top: 14px;
+      color: #ffffff;
+      font-size: 31px;
+      font-weight: 950;
+      line-height: 1.04;
+      min-height: 64px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 0 11px;
+      border: 2px solid rgba(255, 255, 255, 0.65);
+      background: rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 950;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .meta {
+      display: grid;
+      gap: 4px;
+      margin-top: 14px;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+    }
+
+    .progress {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      height: 5px;
+      width: 100%;
+      background: var(--accent);
+      transform-origin: left center;
+      animation: progress 10s linear infinite;
+    }
+
+    @keyframes progress {
+      from { transform: scaleX(1); }
+      to { transform: scaleX(0); }
+    }
+  </style>
+</head>
+<body>
+  <section id="outlookBox" aria-live="polite">
+    <div class="topline">
+      <div class="day text-3d" id="dayLabel">DAY 1</div>
+      <div class="type text-3d" id="typeLabel">SPC OUTLOOK</div>
+    </div>
+    <div class="headline text-3d" id="headline">Loading SPC outlooks</div>
+    <div class="chips" id="chips"></div>
+    <div class="meta text-3d">
+      <div id="validLine">Valid: loading</div>
+      <div id="issuedLine">Issued: loading</div>
+    </div>
+    <div class="progress"></div>
+  </section>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const rotateSeconds = Math.max(4, Number(params.get("setRotateSeconds") || "10"));
+    const zoom = Number(params.get("setElementZoomLevel") || params.get("zoom") || "1");
+    document.documentElement.style.setProperty("--zoom", String(Number.isFinite(zoom) && zoom > 0 ? zoom : 1));
+    document.querySelector(".progress").style.animationDuration = `${rotateSeconds}s`;
+
+    const elements = {
+      box: document.getElementById("outlookBox"),
+      day: document.getElementById("dayLabel"),
+      type: document.getElementById("typeLabel"),
+      headline: document.getElementById("headline"),
+      chips: document.getElementById("chips"),
+      valid: document.getElementById("validLine"),
+      issued: document.getElementById("issuedLine"),
+    };
+
+    let days = [];
+    let currentIndex = 0;
+
+    function formatTime(value) {
+      if (!value) return "Unavailable";
+      const date = new Date(value);
+      if (!Number.isFinite(date.getTime())) return "Unavailable";
+      return date.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+      });
+    }
+
+    function normalizeLabel(item) {
+      const label = String(item?.label || "").toUpperCase();
+      if (/^0?\.\d+/.test(label)) {
+        return `${Math.round(Number(label) * 100)}%`;
+      }
+      return label || "OUTLOOK";
+    }
+
+    function getFallback(day) {
+      return day.type === "probability"
+        ? "PREDICTABILITY TOO LOW"
+        : "NO SEVERE OUTLOOK";
+    }
+
+    function getDayAccent(day) {
+      const top = day.outlooks?.[0];
+      if (!top) return "#777777";
+      return top.stroke || top.fill || "#777777";
+    }
+
+    function renderDay(day) {
+      const outlooks = Array.isArray(day?.outlooks) ? day.outlooks : [];
+      const top = outlooks[0];
+      const accent = getDayAccent(day);
+      document.documentElement.style.setProperty("--accent", accent);
+
+      elements.day.textContent = `DAY ${day.day}`;
+      elements.type.textContent = day.type === "probability" ? "DAY 4-8 PROBABILITY" : "CATEGORICAL OUTLOOK";
+      elements.headline.textContent = top
+        ? `${normalizeLabel(top)} - ${top.detail || "SPC Outlook"}`
+        : getFallback(day);
+
+      elements.chips.replaceChildren();
+      if (outlooks.length) {
+        for (const outlook of outlooks.slice(0, 6)) {
+          const chip = document.createElement("span");
+          chip.className = "chip text-3d";
+          chip.textContent = normalizeLabel(outlook);
+          chip.style.background = outlook.fill || "rgba(255,255,255,0.12)";
+          chip.style.borderColor = outlook.stroke || "rgba(255,255,255,0.65)";
+          elements.chips.appendChild(chip);
+        }
+      } else {
+        const chip = document.createElement("span");
+        chip.className = "chip text-3d";
+        chip.textContent = day.type === "probability" ? "NO 15%+ AREA" : "NO SEVERE AREA";
+        elements.chips.appendChild(chip);
+      }
+
+      elements.valid.textContent = `Valid: ${formatTime(day.valid)}`;
+      elements.issued.textContent = day.error ? `SPC data error: ${day.error}` : `Issued: ${formatTime(day.issued)}`;
+    }
+
+    async function loadOutlooks() {
+      try {
+        const response = await fetch("/api/spc/outlooks", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        days = Array.isArray(payload.days) ? payload.days : [];
+        if (!days.length) throw new Error("No SPC days returned");
+        currentIndex = Math.min(currentIndex, days.length - 1);
+        renderDay(days[currentIndex]);
+      } catch (error) {
+        days = [{ day: 1, type: "categorical", outlooks: [], error: error.message }];
+        renderDay(days[0]);
+      }
+    }
+
+    function rotate() {
+      if (!days.length) return;
+      currentIndex = (currentIndex + 1) % days.length;
+      renderDay(days[currentIndex]);
+    }
+
+    loadOutlooks();
+    window.setInterval(rotate, rotateSeconds * 1000);
+    window.setInterval(loadOutlooks, 10 * 60 * 1000);
+  </script>
+</body>
+</html>

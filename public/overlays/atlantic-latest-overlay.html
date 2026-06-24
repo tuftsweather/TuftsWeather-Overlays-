@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NHC Atlantic Latest Overlay</title>
+  <style>
+    :root {
+      --overlay-width: 1920px;
+      --overlay-height: 1080px;
+      --ticker-height: 74px;
+      --label-width: 320px;
+      --label-bg: #0b3970;
+      --strip-bg: rgba(8, 16, 29, 0.88);
+      --text-color: #ffffff;
+      --muted-color: #d9e2ee;
+      --border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      width: var(--overlay-width);
+      min-height: var(--overlay-height);
+      overflow: hidden;
+      background: transparent;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text-color);
+    }
+
+    .ticker {
+      position: relative;
+      display: flex;
+      align-items: stretch;
+      width: var(--overlay-width);
+      height: var(--ticker-height);
+      background: transparent;
+      overflow: hidden;
+    }
+
+    .ticker-label {
+      flex: 0 0 var(--label-width);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 18px;
+      background: linear-gradient(135deg, #0d4b92, var(--label-bg));
+      color: #fff;
+      font-size: 34px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      border-right: 2px solid var(--border-color);
+      white-space: nowrap;
+    }
+
+    .ticker-main {
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      background: var(--strip-bg);
+      border-top: 2px solid var(--border-color);
+      border-bottom: 2px solid var(--border-color);
+    }
+
+    .ticker-viewport {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+      white-space: nowrap;
+      padding: 0 22px;
+    }
+
+    .ticker-track {
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+      min-width: max-content;
+      will-change: transform;
+    }
+
+    .ticker.is-overflowing .ticker-track {
+      animation: nhc-marquee var(--scroll-duration, 45s) linear infinite;
+    }
+
+    .ticker-copy {
+      display: inline-block;
+      white-space: nowrap;
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--muted-color);
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+    }
+
+    .ticker-gap {
+      display: inline-block;
+      width: 72px;
+      flex: 0 0 72px;
+    }
+
+    #status {
+      display: none;
+      position: fixed;
+      right: 10px;
+      bottom: 10px;
+      max-width: min(620px, calc(100vw - 20px));
+      padding: 7px 9px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #15202b;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 1px 8px rgba(0, 0, 0, 0.12);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #status.visible {
+      display: block;
+    }
+
+    @keyframes nhc-marquee {
+      from { transform: translateX(0); }
+      to { transform: translateX(calc(-1 * var(--scroll-distance, 0px))); }
+    }
+  </style>
+</head>
+<body>
+  <div class="ticker" id="ticker">
+    <div class="ticker-label">NHC Atlantic</div>
+    <div class="ticker-main">
+      <div class="ticker-viewport">
+        <div class="ticker-track" id="tickerTrack">
+          <span class="ticker-copy" id="tickerCopy">Loading latest Atlantic information...</span>
+          <span class="ticker-gap"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="status">Checking official NHC Atlantic feed...</div>
+
+  <script>
+    const CURRENT_STORMS_URL = "https://www.nhc.noaa.gov/CurrentStorms.json";
+    const FEED_URLS = [
+      CURRENT_STORMS_URL,
+      "https://api.allorigins.win/raw?url=" + encodeURIComponent(CURRENT_STORMS_URL),
+      "https://api.allorigins.win/get?url=" + encodeURIComponent(CURRENT_STORMS_URL),
+      "https://corsproxy.io/?" + encodeURIComponent(CURRENT_STORMS_URL),
+      "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(CURRENT_STORMS_URL)
+    ];
+    const REFRESH_INTERVAL_MS = 60000;
+    const params = new URLSearchParams(window.location.search);
+    const debug = params.get("debug") === "1";
+
+    const ticker = document.getElementById("ticker");
+    const tickerTrack = document.getElementById("tickerTrack");
+    const tickerCopy = document.getElementById("tickerCopy");
+    const statusEl = document.getElementById("status");
+
+    let lastMessage = "";
+    const MESSAGE_CACHE_KEY = "atlanticLatestOverlay.lastMessage";
+
+    if (debug) {
+      statusEl.classList.add("visible");
+    }
+
+    function setStatus(message) {
+      if (debug) {
+        statusEl.textContent = message;
+      }
+    }
+
+    function cleanText(value) {
+      return String(value || "")
+        .replace(/<br\s*\/?>/gi, " ")
+        .replace(/<\/?[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function saveMessage(message) {
+      try {
+        localStorage.setItem(MESSAGE_CACHE_KEY, message);
+      } catch (_) {}
+    }
+
+    function loadMessage() {
+      try {
+        return localStorage.getItem(MESSAGE_CACHE_KEY) || "";
+      } catch (_) {
+        return "";
+      }
+    }
+
+    async function fetchWithTimeout(url, timeoutMs = 4500) {
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+      try {
+        const fetchOptions = { cache: "no-store" };
+        if (controller) fetchOptions.signal = controller.signal;
+        const response = await fetch(url, fetchOptions);
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+
+        const text = await response.text();
+        let payload = JSON.parse(text);
+        if (payload && typeof payload.contents === "string") {
+          payload = JSON.parse(payload.contents);
+        }
+
+        if (payload && Array.isArray(payload.activeStorms)) {
+          return payload;
+        }
+
+        throw new Error("Unexpected CurrentStorms payload");
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+
+    async function fetchCurrentStorms() {
+      try {
+        return await Promise.any(FEED_URLS.map((url) => fetchWithTimeout(url)));
+      } catch (error) {
+        const messages = error && error.errors
+          ? error.errors.map((err) => err && err.message ? err.message : String(err)).join("; ")
+          : (error && error.message ? error.message : String(error));
+        throw new Error(messages || "Unknown NHC feed failure");
+      }
+    }
+
+    function isAtlanticStorm(storm) {
+      const binNumber = String(storm && storm.binNumber || "").toUpperCase();
+      const id = String(storm && storm.id || "").toLowerCase();
+      return binNumber.startsWith("AT") || id.startsWith("al");
+    }
+
+    function classificationLabel(value) {
+      const code = String(value || "").toUpperCase();
+      const labels = {
+        PC: "Potential Tropical Cyclone",
+        PTC: "Potential Tropical Cyclone",
+        TD: "Tropical Depression",
+        SD: "Subtropical Depression",
+        TS: "Tropical Storm",
+        SS: "Subtropical Storm",
+        HU: "Hurricane"
+      };
+      return labels[code] || code || "Tropical Cyclone";
+    }
+
+    function compassFromDegrees(value) {
+      const degrees = Number(value);
+      if (!Number.isFinite(degrees)) return null;
+      const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+      return directions[Math.round(degrees / 45) % directions.length];
+    }
+
+    function formatAdvisoryTime(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      return date.toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short"
+      });
+    }
+
+    function formatStorm(storm) {
+      const label = classificationLabel(storm && storm.classification);
+      const name = cleanText(storm && storm.name) || cleanText(storm && storm.id) || "Unnamed";
+      const intensity = Number.parseInt(storm && storm.intensity, 10);
+      const pressure = Number.parseInt(storm && storm.pressure, 10);
+      const location = [storm && storm.latitude, storm && storm.longitude].filter(Boolean).join(" ");
+      const movementDir = compassFromDegrees(storm && storm.movementDir);
+      const movementSpeed = Number.parseInt(storm && storm.movementSpeed, 10);
+      const advisory = storm && storm.publicAdvisory;
+      const updated = formatAdvisoryTime((advisory && advisory.issuance) || (storm && storm.lastUpdate));
+      const parts = [`${label} ${name}`];
+
+      if (Number.isFinite(intensity)) parts.push(`${intensity} kt`);
+      if (Number.isFinite(pressure)) parts.push(`${pressure} mb`);
+      if (location) parts.push(location);
+      if (movementDir && Number.isFinite(movementSpeed)) {
+        parts.push(`Moving ${movementDir} at ${movementSpeed} mph`);
+      } else if (movementDir) {
+        parts.push(`Moving ${movementDir}`);
+      }
+      if (advisory && advisory.advNum) parts.push(`Advisory ${advisory.advNum}`);
+      if (updated) parts.push(`Updated ${updated}`);
+
+      return parts.join(" | ");
+    }
+
+    function buildActiveSystemsMessage(payload) {
+      const storms = Array.isArray(payload && payload.activeStorms) ? payload.activeStorms.filter(isAtlanticStorm) : [];
+      if (!storms.length) {
+        return "No active Atlantic tropical systems right now.";
+      }
+      return storms.map(formatStorm).join("     /     ");
+    }
+
+    function renderMessage(message) {
+      const nextMessage = cleanText(message) || "No Atlantic information is available from NHC right now.";
+      if (nextMessage === lastMessage) {
+        return;
+      }
+
+      lastMessage = nextMessage;
+      saveMessage(nextMessage);
+      ticker.classList.remove("is-overflowing");
+      tickerCopy.textContent = nextMessage;
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const viewportWidth = tickerTrack.parentElement.clientWidth;
+          const trackWidth = tickerCopy.scrollWidth;
+          if (trackWidth > viewportWidth) {
+            const distance = trackWidth - viewportWidth;
+            const duration = Math.max(20, Math.round(distance / 28));
+            ticker.style.setProperty("--scroll-distance", `${distance}px`);
+            ticker.style.setProperty("--scroll-duration", `${duration}s`);
+            ticker.classList.add("is-overflowing");
+          } else {
+            ticker.style.removeProperty("--scroll-distance");
+            ticker.style.removeProperty("--scroll-duration");
+          }
+        });
+      });
+    }
+
+    async function refreshFeed() {
+      try {
+        setStatus("Checking official NHC Atlantic active systems...");
+        const payload = await fetchCurrentStorms();
+        renderMessage(buildActiveSystemsMessage(payload));
+        setStatus("NHC Atlantic active systems updated");
+      } catch (error) {
+        const cached = loadMessage();
+        if (cached) {
+          renderMessage(cached);
+        } else if (!lastMessage) {
+          renderMessage("NHC Atlantic active systems unavailable right now.");
+        }
+        setStatus("NHC Atlantic active systems unavailable: " + (error && error.message ? error.message : String(error)));
+      }
+    }
+
+    const cachedMessage = loadMessage();
+    if (cachedMessage) renderMessage(cachedMessage);
+    refreshFeed();
+    window.setInterval(refreshFeed, REFRESH_INTERVAL_MS);
+  </script>
+</body>
+</html>

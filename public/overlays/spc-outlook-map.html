@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPC Outlook Map</title>
+  <style>
+    :root {
+      --canvas-width: 1920px;
+      --canvas-height: 1080px;
+      --zoom: 1;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: var(--canvas-width);
+      height: var(--canvas-height);
+      overflow: hidden;
+      background: transparent;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      transform-origin: top left;
+      transform: scale(var(--zoom));
+    }
+
+    #stage {
+      position: fixed;
+      left: 28px;
+      top: 118px;
+      width: 930px;
+      height: 650px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    #outlookImage {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      opacity: 0;
+      transition: opacity 180ms ease;
+    }
+
+    #outlookImage.visible {
+      opacity: 1;
+    }
+
+    #status {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+      background: rgba(0, 0, 0, 0.72);
+      color: #ffffff;
+      font-size: 34px;
+      font-weight: 950;
+      line-height: 1.05;
+      text-align: center;
+      text-transform: uppercase;
+      text-shadow:
+        -1px -1px 0 rgba(0,0,0,0.82),
+        1px -1px 0 rgba(0,0,0,0.82),
+        -1px 1px 0 rgba(0,0,0,0.82),
+        1px 1px 0 rgba(0,0,0,0.82),
+        0 3px 0 rgba(0,0,0,0.5);
+    }
+
+    #status.visible {
+      display: flex;
+    }
+  </style>
+</head>
+<body>
+  <main id="stage" aria-live="polite">
+    <img id="outlookImage" alt="Official SPC outlook map">
+    <div id="status">Loading SPC outlook map</div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const rotateSeconds = Math.max(4, Number(params.get("setRotateSeconds") || "10"));
+    const zoom = Number(params.get("setElementZoomLevel") || params.get("zoom") || "1");
+    const force = params.get("force") === "1";
+    document.documentElement.style.setProperty("--zoom", String(Number.isFinite(zoom) && zoom > 0 ? zoom : 1));
+
+    const imageEl = document.getElementById("outlookImage");
+    const statusEl = document.getElementById("status");
+    let images = [];
+    let currentIndex = 0;
+
+    function showStatus(message) {
+      imageEl.classList.remove("visible");
+      statusEl.textContent = message;
+      statusEl.classList.add("visible");
+    }
+
+    function showImage(item) {
+      if (!item?.imageUrl) {
+        showStatus("SPC outlook image unavailable");
+        return;
+      }
+
+      statusEl.classList.remove("visible");
+      imageEl.classList.remove("visible");
+      imageEl.alt = item.title || `SPC Day ${item.day} Outlook`;
+      imageEl.src = `${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
+    }
+
+    imageEl.addEventListener("load", () => {
+      imageEl.classList.add("visible");
+      statusEl.classList.remove("visible");
+    });
+
+    imageEl.addEventListener("error", () => {
+      showStatus("SPC outlook image failed to load");
+    });
+
+    async function loadImages() {
+      try {
+        const response = await fetch(`/api/spc/outlook-images${force ? "?force=1" : ""}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        images = (Array.isArray(payload.images) ? payload.images : []).filter((item) => item.imageUrl);
+        currentIndex = Math.min(currentIndex, Math.max(0, images.length - 1));
+        if (!images.length) {
+          showStatus("No SPC outlook images available");
+          return;
+        }
+        showImage(images[currentIndex]);
+      } catch {
+        showStatus("SPC outlook images unavailable");
+      }
+    }
+
+    function rotate() {
+      if (!images.length) return;
+      currentIndex = (currentIndex + 1) % images.length;
+      showImage(images[currentIndex]);
+    }
+
+    loadImages();
+    window.setInterval(rotate, rotateSeconds * 1000);
+    window.setInterval(loadImages, 10 * 60 * 1000);
+  </script>
+</body>
+</html>
