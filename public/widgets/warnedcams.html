@@ -907,9 +907,16 @@
             return;
           }
 
+          const matchingChaserIndex = state.chasers.findIndex((match) => match.stream.properties.stream_url === previousUrl);
           const matchingIndex = state.matches.findIndex((match) => match.stream.properties.stream_url === previousUrl);
+          state.currentChaserIndex = matchingChaserIndex >= 0 ? matchingChaserIndex : -1;
           state.currentIndex = matchingIndex >= 0 ? matchingIndex : -1;
-          if (state.currentIndex === -1) {
+          if (state.currentChaserIndex >= 0) {
+            loadStream(state.chasers[state.currentChaserIndex]);
+          } else if (state.currentIndex === -1 && state.chasers.length) {
+            state.currentChaserIndex = 0;
+            loadStream(state.chasers[0]);
+          } else if (state.currentIndex === -1) {
             rotateToNext(true);
           } else {
             loadStream(state.matches[state.currentIndex]);
