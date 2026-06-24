@@ -242,7 +242,7 @@
 
       function isLikelyVideo(url) {
         const value = String(url || "").toLowerCase();
-        return value.includes(".m3u8") || value.includes("/playlist") || value.includes("/manifest");
+        return value.includes(".m3u8") || value.includes("/playlist") || value.includes("/manifest") || value.includes("youtube.com/") || value.includes("youtu.be/") || value.includes("twitch.tv/");
       }
 
       function normalizeCamera(feature) {
@@ -265,6 +265,7 @@
             location: firstValue([props.location, props.city, props.county, props.state, props.directionLabel, props.source, "TRAFFIC CAMERA"]),
             source: firstValue([props.source, props.provider, props.sourceType, "traffic-cameras"]),
             stream_url: streamUrl,
+            is_custom: Boolean(props.is_custom),
           },
         };
       }
@@ -594,6 +595,7 @@
   </script>
 </body>
 </html>
+
 
 
 
