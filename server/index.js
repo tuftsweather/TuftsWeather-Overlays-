@@ -307,7 +307,7 @@ function isLikelyVideoUrl(url) {
 function normalizeCustomCameraUrl(url) {
   const rawValue = String(url || '').trim();
   const srcMatch = rawValue.match(/\bsrc=(["'])(.*?)\1/i);
-  const value = srcMatch?.[2]?.trim() || rawValue;
+  const value = (srcMatch?.[2]?.trim() || rawValue).replace(/&amp;/g, '&');
   if (!value) {
     return '';
   }

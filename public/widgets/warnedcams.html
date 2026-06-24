@@ -599,7 +599,7 @@
         elements.video.removeAttribute("src");
         elements.video.load();
         elements.video.style.opacity = "0";
-        elements.embedFrame.src = url;
+        elements.embedFrame.src = String(url || "").replace(/&amp;/g, "&");
         elements.embedFrame.style.opacity = "1";
       }
       function clearCurrentStream() {
@@ -868,6 +868,10 @@
             const events = await fetchEvents();
             matches = getWarnedCameraMatches(events);
             console.warn("[WarnedCams] Server match endpoint failed, using local fallback", serverMatchError);
+          }
+
+          if (!state.cameras.length) {
+            await loadTrafficCameras();
           }
 
           let contextEvent = matches[0]?.event || null;

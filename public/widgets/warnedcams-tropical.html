@@ -329,7 +329,7 @@
         elements.video.removeAttribute("src");
         elements.video.load();
         elements.video.style.opacity = "0";
-        elements.embedFrame.src = url;
+        elements.embedFrame.src = String(url || "").replace(/&amp;/g, "&");
         elements.embedFrame.style.opacity = "1";
       }
       function clearCurrentStream() {
