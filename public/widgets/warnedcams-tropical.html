@@ -355,10 +355,15 @@
           elements.statusText.textContent = message;
           return;
         }
-        document.documentElement.style.setProperty("--overlay-primary", match.theme.primary);
-        document.documentElement.style.setProperty("--overlay-secondary", match.theme.secondary);
-        elements.warningText.textContent = match.title;
-        elements.locationText.textContent = `${String(match.stream.properties.name || "CAMERA").toUpperCase()} - ${Math.round(match.distanceMiles)} MI`;
+        const theme = match.isChaserCutaway
+          ? { primary: "#111827", secondary: "#060910" }
+          : match.theme;
+        document.documentElement.style.setProperty("--overlay-primary", theme.primary);
+        document.documentElement.style.setProperty("--overlay-secondary", theme.secondary);
+        elements.warningText.textContent = match.isChaserCutaway ? "LIVE CHASER" : match.title;
+        elements.locationText.textContent = match.isChaserCutaway
+          ? String(match.stream.properties.name || match.stream.properties.location || "CAMERA").toUpperCase()
+          : `${String(match.stream.properties.name || "CAMERA").toUpperCase()} - ${Math.round(match.distanceMiles)} MI`;
         elements.topPill.classList.remove("hidden");
         elements.status.classList.add("hidden");
       }
@@ -533,7 +538,7 @@
           const storms = await fetchStormData();
           const activeStorms = storms.filter(isAtlanticStorm);
           const matches = getMatches(storms);
-          const chasers = activeStorms.length ? getCustomChaserMatches(activeStorms[0]) : [];
+          const chasers = getCustomChaserMatches(activeStorms[0] || null);
           const nextSignature = [
             ...activeStorms.map((storm) => `${storm?.id || ""}|${storm?.lastUpdate || ""}|${storm?.publicAdvisory?.advNum || ""}`),
             ...chasers.map((match) => `chaser|${match?.stream?.properties?.cameraId || match?.stream?.properties?.stream_url || ""}`),

@@ -626,7 +626,9 @@
           return;
         }
 
-        const theme = classifyAlert(match.event);
+        const theme = match.isChaserCutaway
+          ? { label: "LIVE CHASER", primary: "#111827", secondary: "#060910" }
+          : classifyAlert(match.event);
         document.documentElement.style.setProperty("--overlay-primary", theme.primary);
         document.documentElement.style.setProperty("--overlay-secondary", theme.secondary);
         elements.warningText.textContent = theme.label;
@@ -873,7 +875,7 @@
             const events = await fetchEvents();
             contextEvent = events[0] || null;
           }
-          const chasers = contextEvent ? getCustomChaserMatches(contextEvent) : [];
+          const chasers = getCustomChaserMatches(contextEvent);
           const nextSignature = [
             ...matches.map((match) => `${match?.stream?.properties?.cameraId || match?.stream?.properties?.stream_url || ""}|${match?.event?.properties?.details?.tracking || match?.event?.id || ""}|${match?.event?.properties?.issued || ""}|${match?.event?.properties?.expires || ""}`),
             ...chasers.map((match) => `chaser|${match?.stream?.properties?.cameraId || match?.stream?.properties?.stream_url || ""}`),
