@@ -136,6 +136,9 @@ function App() {
           popupAlertsUrl:
             payload.endpoints?.popupAlerts ??
             fallbackServiceSnapshot.popupAlertsUrl,
+          tropicalPopupAlertsUrl:
+            payload.endpoints?.tropicalPopup ??
+            fallbackServiceSnapshot.tropicalPopupAlertsUrl,
           activeWarningStripUrl:
             payload.endpoints?.activeWarningStrip ??
             fallbackServiceSnapshot.activeWarningStripUrl,
@@ -172,6 +175,11 @@ function App() {
         label: 'Popup Alerts',
         url: service.popupAlertsUrl,
         note: 'New and updated local alert popup',
+      },
+      {
+        label: 'Tropical Popup',
+        url: service.tropicalPopupAlertsUrl,
+        note: 'Tropical warning and watch popup',
       },
       {
         label: 'Warning Strip',
@@ -297,6 +305,9 @@ function App() {
       popupAlertsUrl:
         payload.endpoints?.popupAlerts ??
         fallbackServiceSnapshot.popupAlertsUrl,
+      tropicalPopupAlertsUrl:
+        payload.endpoints?.tropicalPopup ??
+        fallbackServiceSnapshot.tropicalPopupAlertsUrl,
       activeWarningStripUrl:
         payload.endpoints?.activeWarningStrip ??
         fallbackServiceSnapshot.activeWarningStripUrl,

@@ -22,6 +22,7 @@ export type ServiceSnapshot = {
   alertCounterUrl: string
   warningOutlineUrl: string
   popupAlertsUrl: string
+  tropicalPopupAlertsUrl: string
   activeWarningStripUrl: string
   warnedCamsUrl: string
   streamUrl: string
@@ -51,6 +52,12 @@ export const overlayCards: OverlayCard[] = [
     route: '/overlays/tropical-banner.html',
     status: 'Ready',
     note: 'Highest active Atlantic tropical system banner using the primary banner layout.',
+  },
+  {
+    name: 'Tropical Popup Alerts',
+    route: '/overlays/tropical-popup-alerts.html?setMaxHistory=2',
+    status: 'Ready',
+    note: 'New and updated tropical warning and watch popups.',
   },
   {
     name: 'Warning Outline',
@@ -183,6 +190,7 @@ export const fallbackServiceSnapshot: ServiceSnapshot = {
   alertCounterUrl: 'http://127.0.0.1:4318/overlays/alertactive.html',
   warningOutlineUrl: 'http://127.0.0.1:4318/overlays/weather-warning-outline.html',
   popupAlertsUrl: 'http://127.0.0.1:4318/overlays/popup-alerts.html?setMaxHistory=2&setBeepVolume=0&setAlertVolume=0',
+  tropicalPopupAlertsUrl: 'http://127.0.0.1:4318/overlays/tropical-popup-alerts.html?setMaxHistory=2',
   activeWarningStripUrl: 'http://127.0.0.1:4318/overlays/active-warning-strip.html',
   warnedCamsUrl: 'http://127.0.0.1:4318/widgets/warnedcams',
   streamUrl: 'ws://127.0.0.1:4318/stream',
