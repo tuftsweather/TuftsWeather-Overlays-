@@ -18,6 +18,7 @@ const defaultConfigPath = path.join(rootDir, 'config', 'localoverlays.json');
 const parserStorageDir = path.join(rootDir, 'storage', 'parser');
 const parserDatabasePath = path.join(parserStorageDir, 'shapefiles.db');
 const warnedCamerasPath = path.join(staticDir, 'warnedcams-traffic-cameras.json');
+const atmosxCameraApiUrl = 'https://scriptkitty.cafe/relay/atmosx/cameras';
 
 const defaultConfig = {
   server: {
@@ -228,6 +229,9 @@ const state = {
 
 let cameraLiteCache = null;
 let cameraLiteCacheMtime = 0;
+let cameraApiCache = null;
+let cameraApiCacheExpiresAt = 0;
+let cameraApiCachePromise = null;
 
 function normalizeCameraSource(value) {
   return String(value || '').trim();
@@ -379,72 +383,175 @@ function getCustomCameraFeatures(widget = 'severe') {
   return features;
 }
 
-function getCameraLitePayload(widget = 'severe', { includeCustom = true } = {}) {
+function isBlockedCameraFeature(feature) {
+  const properties = feature?.properties || {};
+  const source = normalizeCameraSource(pickFirstString([properties.source, properties.provider, properties.sourceType, '']));
+  const model = normalizeCameraSource(properties.model).toUpperCase();
+  const name = pickFirstString([properties.name, properties.cameraName, properties.camera_title, properties.title]);
+  const derivedState = deriveCameraState(properties);
+  const combined = `${source} ${model} ${name} ${derivedState}`.toLowerCase();
+
+  return model === 'USER' ||
+    derivedState === 'CHASERS' ||
+    combined.includes('chaser') ||
+    combined.includes('live-chaser') ||
+    combined.includes('stormrunner media') ||
+    combined.includes('weather_wise');
+}
+
+function normalizeCameraFeature(feature) {
+  const coordinates = feature?.geometry?.coordinates;
+  const [lon, lat] = Array.isArray(coordinates) ? coordinates : [];
+  if (!Number.isFinite(Number(lon)) || !Number.isFinite(Number(lat))) {
+    return null;
+  }
+
+  const properties = feature?.properties ?? {};
+  if (isBlockedCameraFeature(feature)) {
+    return null;
+  }
+
+  const streamUrl = pickFirstUrl([
+    properties.hls_url, properties.streamingURL, properties.streamingVideoURL, properties.m3u8Url,
+    properties.m3u8_url, properties.m3u8, properties.url2, properties.URL2, properties.hls_stream_protected,
+    properties.streamSrc, properties.httpsVideoUrl, properties.httpVideoUrl, properties.https_url,
+    properties.ios_url, properties.stream_url, properties.video_url, properties.videoUrl, properties.url,
+  ]);
+
+  if (!isLikelyVideoUrl(streamUrl)) {
+    return null;
+  }
+
+  const derivedState = deriveCameraState(properties);
+  const name = pickFirstString([
+    properties.cameraName,
+    properties.camera_title,
+    properties.name,
+    properties.title,
+    properties.description,
+  ]) || 'Traffic Camera';
+  const source = pickFirstString([properties.source, properties.provider, properties.sourceType, 'traffic-cameras']);
+
+  return {
+    type: 'Feature',
+    geometry: {
+      type: 'Point',
+      coordinates: [Number(lon), Number(lat)],
+    },
+    properties: {
+      cameraId: pickFirstString([
+        properties._mapKey,
+        properties.cameraId,
+        properties.camera_id,
+        properties.id,
+        feature.id,
+        `${source}:${name}:${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`,
+      ]),
+      name,
+      location: pickFirstString([
+        properties.location,
+        properties.city,
+        properties.county,
+        properties.state,
+        properties.directionLabel,
+        source,
+        'TRAFFIC CAMERA',
+      ]),
+      source,
+      state: derivedState,
+      model: pickFirstString([properties.model, 'DEVICE']),
+      stream_url: streamUrl,
+    },
+  };
+}
+
+function normalizeCameraFeatureCollection(parsed) {
+  const sourceFeatures = Array.isArray(parsed?.features) ? parsed.features : [];
+  const features = [];
+  const seen = new Set();
+
+  for (const feature of sourceFeatures) {
+    const normalized = normalizeCameraFeature(feature);
+    if (!normalized) {
+      continue;
+    }
+
+    const key = String(normalized.properties.cameraId || normalized.properties.stream_url || '').trim();
+    if (key && seen.has(key)) {
+      continue;
+    }
+    if (key) {
+      seen.add(key);
+    }
+    features.push(normalized);
+  }
+
+  return makeFeatureCollection(features);
+}
+
+function getBundledCameraPayload() {
   if (!fs.existsSync(warnedCamerasPath)) {
-    return makeFeatureCollection(includeCustom ? getCustomCameraFeatures(widget) : []);
+    return makeFeatureCollection([]);
   }
 
   const stats = fs.statSync(warnedCamerasPath);
   const mtimeMs = stats.mtimeMs || 0;
   if (cameraLiteCache && cameraLiteCacheMtime === mtimeMs) {
-    const customFeatures = includeCustom ? getCustomCameraFeatures(widget) : [];
-    return makeFeatureCollection([
-      ...cameraLiteCache.features,
-      ...customFeatures,
-    ]);
+    return cameraLiteCache;
   }
 
   const raw = fs.readFileSync(warnedCamerasPath, 'utf8');
   const parsed = JSON.parse(raw);
-  const sourceFeatures = Array.isArray(parsed?.features) ? parsed.features : [];
-  const features = [];
+  cameraLiteCache = normalizeCameraFeatureCollection(parsed);
+  cameraLiteCacheMtime = mtimeMs;
+  return cameraLiteCache;
+}
 
-  for (const feature of sourceFeatures) {
-    const coordinates = feature?.geometry?.coordinates;
-    const [lon, lat] = Array.isArray(coordinates) ? coordinates : [];
-    if (!Number.isFinite(Number(lon)) || !Number.isFinite(Number(lat))) {
-      continue;
-    }
-
-    const properties = feature?.properties ?? {};
-    const sourceName = normalizeCameraSource(pickFirstString([properties.source, properties.provider, properties.sourceType, '']));
-    const derivedState = deriveCameraState(properties);
-    if (sourceName.toLowerCase().includes('chaser') || derivedState === 'CHASERS') {
-      continue;
-    }
-
-    const streamUrl = pickFirstUrl([
-      properties.hls_url, properties.streamingURL, properties.streamingVideoURL, properties.m3u8Url,
-      properties.m3u8_url, properties.m3u8, properties.url2, properties.URL2, properties.hls_stream_protected,
-      properties.streamSrc, properties.httpsVideoUrl, properties.httpVideoUrl, properties.https_url,
-      properties.ios_url, properties.stream_url, properties.video_url, properties.videoUrl, properties.url,
-    ]);
-
-    if (!isLikelyVideoUrl(streamUrl)) {
-      continue;
-    }
-
-    features.push({
-      type: 'Feature',
-      geometry: {
-        type: 'Point',
-        coordinates: [Number(lon), Number(lat)],
-      },
-      properties: {
-        cameraId: pickFirstString([properties._mapKey, properties.cameraId, properties.camera_id, properties.id, feature.id, streamUrl]),
-        name: pickFirstString([properties.cameraName, properties.camera_title, properties.name, properties.title, properties.description]) || 'Traffic Camera',
-        location: pickFirstString([properties.location, properties.city, properties.county, properties.state, properties.directionLabel, properties.source, 'TRAFFIC CAMERA']),
-        source: pickFirstString([properties.source, properties.provider, properties.sourceType, 'traffic-cameras']),
-        state: derivedState,
-        stream_url: streamUrl,
-      },
-    });
+async function fetchCameraApiPayload({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && cameraApiCache && cameraApiCacheExpiresAt > now) {
+    return cameraApiCache;
   }
 
-  cameraLiteCache = makeFeatureCollection(features);
-  cameraLiteCacheMtime = mtimeMs;
+  if (!force && cameraApiCachePromise) {
+    return cameraApiCachePromise;
+  }
+
+  cameraApiCachePromise = fetch(atmosxCameraApiUrl, {
+    headers: {
+      'User-Agent': 'TuftsWeatherOverlays/1.0',
+      Accept: 'application/geo+json, application/json, */*',
+    },
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Camera API HTTP ${response.status}`);
+      }
+      const parsed = await response.json();
+      const normalized = normalizeCameraFeatureCollection(parsed);
+      cameraApiCache = {
+        ...normalized,
+        source: atmosxCameraApiUrl,
+        updatedAt: new Date().toISOString(),
+      };
+      cameraApiCacheExpiresAt = Date.now() + 5 * 60 * 1000;
+      return cameraApiCache;
+    })
+    .catch((error) => {
+      console.warn('[TuftsWeather Overlays] Camera API failed; using bundled fallback:', error instanceof Error ? error.message : error);
+      return getBundledCameraPayload();
+    })
+    .finally(() => {
+      cameraApiCachePromise = null;
+    });
+
+  return cameraApiCachePromise;
+}
+
+async function getCameraLitePayload(widget = 'severe', { includeCustom = true, force = false } = {}) {
+  const basePayload = await fetchCameraApiPayload({ force });
   return makeFeatureCollection([
-    ...features,
+    ...(basePayload.features || []),
     ...(includeCustom ? getCustomCameraFeatures(widget) : []),
   ]);
 }
@@ -526,7 +633,17 @@ function haversineMiles(lat1, lon1, lat2, lon2) {
   return radiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', search = '', max = 80, widget = 'severe' } = {}) {
+function getCameraAlertClassification(alert, widget = 'severe') {
+  if (widget === 'winter') {
+    return classifyWinterAlert(alert);
+  }
+  if (widget === 'tropical') {
+    return classifyTropicalAlert(alert);
+  }
+  return classifyAlert(alert);
+}
+
+async function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', search = '', max = 80, widget = 'severe' } = {}) {
   const sourceFilter = String(streamSource || '*').toLowerCase();
   const searchFilter = String(search || '').trim().toLowerCase();
   const activeAlerts = getRelevantActiveAlerts()
@@ -539,7 +656,7 @@ function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', 
             lat: (bounds.minLat + bounds.maxLat) / 2,
           }
         : null;
-      return { event, polygonSet, bounds, center, classification: classifyAlert(event) };
+      return { event, polygonSet, bounds, center, classification: getCameraAlertClassification(event, widget) };
     })
     .filter((entry) => entry.classification)
     .sort((a, b) => {
@@ -553,7 +670,7 @@ function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', 
     return [];
   }
 
-  const cameras = getCameraLitePayload(widget, { includeCustom: false }).features || [];
+  const cameras = (await getCameraLitePayload(widget, { includeCustom: false })).features || [];
   const matches = [];
   const seen = new Set();
 
@@ -606,8 +723,8 @@ function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', 
   }
 
   matches.sort((a, b) => {
-    const aRank = classifyAlert(a.event)?.rank || 0;
-    const bRank = classifyAlert(b.event)?.rank || 0;
+    const aRank = getCameraAlertClassification(a.event, widget)?.rank || 0;
+    const bRank = getCameraAlertClassification(b.event, widget)?.rank || 0;
     if (bRank !== aRank) return bRank - aRank;
     return String(a.stream?.properties?.location || '').localeCompare(String(b.stream?.properties?.location || ''));
   });
@@ -2461,36 +2578,48 @@ app.post('/api/config/custom-cameras', express.json({ limit: '160kb' }), (reques
   }
 });
 
-app.get('/api/cameras', (_request, response) => {
-  if (!fs.existsSync(warnedCamerasPath)) {
-    response.status(404).json({ error: 'Camera data not found' });
-    return;
+app.get('/api/cameras', async (_request, response) => {
+  try {
+    response.setHeader('Cache-Control', 'no-store');
+    response.json(await getCameraLitePayload('severe'));
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
-
-  response.setHeader('Cache-Control', 'no-store');
-  response.sendFile(warnedCamerasPath);
 });
 
-app.get('/api/cameras-lite', (request, response) => {
+app.get('/api/cameras-lite', async (request, response) => {
   const widget = String(request.query.widget || 'severe').toLowerCase();
-  response.setHeader('Cache-Control', 'public, max-age=300');
-  response.json(getCameraLitePayload(widget));
+  try {
+    response.setHeader('Cache-Control', 'public, max-age=300');
+    response.json(await getCameraLitePayload(widget));
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
-app.get('/api/warned-cameras', (request, response) => {
+app.get('/api/warned-cameras', async (request, response) => {
   const fallbackRadiusMiles = Math.max(5, Number(request.query.fallbackRadiusMiles || 18));
   const max = Math.min(200, Math.max(1, Number(request.query.max || 80)));
   const widget = String(request.query.widget || 'severe').toLowerCase();
-  response.setHeader('Cache-Control', 'no-store');
-  response.json({
-    matches: getWarnedCameraMatches({
+  try {
+    response.setHeader('Cache-Control', 'no-store');
+    response.json({
+      matches: await getWarnedCameraMatches({
+        fallbackRadiusMiles,
+        max,
+        widget,
+        streamSource: request.query.streamSource,
+        search: request.query.search,
+      }),
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
       fallbackRadiusMiles,
       max,
       widget,
-      streamSource: request.query.streamSource,
-      search: request.query.search,
-    }),
-  });
+    });
+  }
 });
 
 app.get('/api/events', (_request, response) => {
