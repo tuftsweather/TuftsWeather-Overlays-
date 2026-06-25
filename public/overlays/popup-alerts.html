@@ -591,6 +591,16 @@
       const paramsText = normalize(Object.entries(properties.parameters || {})
         .map(([key, value]) => `${key} ${Array.isArray(value) ? value.join(" ") : value}`)
         .join(" "));
+      const isObservedTornadoWarning =
+        event === "TORNADO WARNING" &&
+        (
+          combinedText.includes("CONFIRMED TORNADO") ||
+          combinedText.includes("TORNADO OBSERVED") ||
+          combinedText.includes("OBSERVED TORNADO") ||
+          paramsText.includes("TORNADODETECTION OBSERVED") ||
+          paramsText.includes("TORNADO_DETECTION OBSERVED") ||
+          paramsText.includes("TORNADO DETECTION OBSERVED")
+        );
 
       if (combinedText.includes("TORNADO EMERGENCY") || paramsText.includes("CATASTROPHIC")) {
         return { className: "emergency", label: "TORNADO EMERGENCY" };
@@ -607,7 +617,7 @@
       if (name.includes("SEVERE THUNDERSTORM WATCH") || event === "SEVERE THUNDERSTORM WATCH") {
         return { className: "severe-watch", label: "Severe Thunderstorm Watch" };
       }
-      if (name.includes("CONFIRMED TORNADO WARNING") || name.includes("TORNADO OBSERVED")) {
+      if (isObservedTornadoWarning) {
         return { className: "tornado-observed", label: "OBSERVED - TORNADO WARNING" };
       }
       if (name.includes("RADAR INDICATED TORNADO WARNING") || event === "TORNADO WARNING") {
@@ -910,7 +920,7 @@
       }
 
       if (classification?.className === "tornado-observed") {
-        return actionType === "UPDATED" ? SOUND_LIBRARY.tornadoUpdated : SOUND_LIBRARY.confirmedTornado;
+        return SOUND_LIBRARY.confirmedTornado;
       }
 
       if (classification?.className === "pds") {
