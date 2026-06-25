@@ -643,7 +643,7 @@ function getCameraAlertClassification(alert, widget = 'severe') {
   return classifyAlert(alert);
 }
 
-async function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource = '*', search = '', max = 80, widget = 'severe' } = {}) {
+async function getWarnedCameraMatches({ fallbackRadiusMiles = 250, streamSource = '*', search = '', max = 80, widget = 'severe' } = {}) {
   const sourceFilter = String(streamSource || '*').toLowerCase();
   const searchFilter = String(search || '').trim().toLowerCase();
   const activeAlerts = getRelevantActiveAlerts()
@@ -711,11 +711,20 @@ async function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource =
         isMatch = haversineMiles(lat, lon, warning.center.lat, warning.center.lon) <= fallbackRadiusMiles;
       }
 
+      const distanceMiles = warning.center
+        ? haversineMiles(lat, lon, warning.center.lat, warning.center.lon)
+        : null;
+
       if (isMatch) {
         const key = `${properties.cameraId || properties.stream_url}|${getTrackingId(warning.event)}`;
         if (!seen.has(key)) {
           seen.add(key);
-          matches.push({ stream, event: warning.event });
+          matches.push({
+            stream,
+            event: warning.event,
+            distanceMiles,
+            matchType: pointInPolygonSet(lon, lat, warning.polygonSet) ? 'inside' : 'nearby',
+          });
         }
         break;
       }
@@ -726,6 +735,12 @@ async function getWarnedCameraMatches({ fallbackRadiusMiles = 18, streamSource =
     const aRank = getCameraAlertClassification(a.event, widget)?.rank || 0;
     const bRank = getCameraAlertClassification(b.event, widget)?.rank || 0;
     if (bRank !== aRank) return bRank - aRank;
+    if ((a.matchType === 'inside') !== (b.matchType === 'inside')) {
+      return a.matchType === 'inside' ? -1 : 1;
+    }
+    const aDistance = Number.isFinite(a.distanceMiles) ? a.distanceMiles : Infinity;
+    const bDistance = Number.isFinite(b.distanceMiles) ? b.distanceMiles : Infinity;
+    if (aDistance !== bDistance) return aDistance - bDistance;
     return String(a.stream?.properties?.location || '').localeCompare(String(b.stream?.properties?.location || ''));
   });
 
@@ -2598,7 +2613,7 @@ app.get('/api/cameras-lite', async (request, response) => {
 });
 
 app.get('/api/warned-cameras', async (request, response) => {
-  const fallbackRadiusMiles = Math.max(5, Number(request.query.fallbackRadiusMiles || 18));
+  const fallbackRadiusMiles = Math.max(5, Number(request.query.fallbackRadiusMiles || 250));
   const max = Math.min(200, Math.max(1, Number(request.query.max || 80)));
   const widget = String(request.query.widget || 'severe').toLowerCase();
   try {
