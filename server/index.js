@@ -1217,7 +1217,7 @@ function classifyAlert(alert) {
   }
 
   if (name.includes('RADAR INDICATED TORNADO WARNING') || event === 'TORNADO WARNING') {
-    return { key: 'radar-indicated-tornado-warning', label: 'RADAR INDICATED TORNADO WARNING', rank: 70, color: '#d10000', fill: '#d10000' };
+    return { key: 'radar-indicated-tornado-warning', label: 'TORNADO WARNING', rank: 70, color: '#d10000', fill: '#d10000' };
   }
 
   if (name.includes('TORNADO WATCH') || event === 'TORNADO WATCH') {
