@@ -1201,7 +1201,18 @@ function classifyAlert(alert) {
     return { key: 'pds-tornado', label: 'PDS - TORNADO WARNING', rank: 90, color: '#7c3aed', fill: '#7c3aed' };
   }
 
-  if (name.includes('CONFIRMED TORNADO WARNING') || name.includes('TORNADO OBSERVED')) {
+  const isObservedTornadoWarning =
+    event === 'TORNADO WARNING' &&
+    (
+      combinedText.includes('CONFIRMED TORNADO') ||
+      combinedText.includes('TORNADO OBSERVED') ||
+      combinedText.includes('OBSERVED TORNADO') ||
+      paramsText.includes('TORNADODETECTION OBSERVED') ||
+      paramsText.includes('TORNADO_DETECTION OBSERVED') ||
+      paramsText.includes('TORNADO DETECTION OBSERVED')
+    );
+
+  if (isObservedTornadoWarning) {
     return { key: 'tornado-observed', label: 'OBSERVED - TORNADO WARNING', rank: 80, color: '#a40000', fill: '#a40000' };
   }
 
