@@ -391,6 +391,8 @@
     let activeEntry = null;
     let eventQueue = [];
     let soundChain = Promise.resolve();
+    const activeAudioClips = new Set();
+    let suppressLiveUntil = 0;
     const recentSoundKeys = new Map();
     let streamPrimed = false;
     const overlayStartedAt = Date.now();
@@ -1002,11 +1004,13 @@
       }
 
       const audio = new Audio(url);
+      activeAudioClips.add(audio);
       audio.preload = "auto";
       audio.volume = volume;
 
       return new Promise((resolve) => {
         const cleanup = () => {
+          activeAudioClips.delete(audio);
           audio.removeEventListener("ended", handleDone);
           audio.removeEventListener("error", handleDone);
         };
@@ -1024,6 +1028,17 @@
           resolve();
         });
       });
+    }
+
+    function stopAllAudioClips() {
+      for (const audio of activeAudioClips) {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {}
+      }
+      activeAudioClips.clear();
+      soundChain = Promise.resolve();
     }
 
     function playAlertSound(alert, classification) {
@@ -1280,6 +1295,15 @@
         const batchSentAt = Date.parse(String(data.message.sentAt || "")) || 0;
         if (isTestSource) {
           allowQueue = true;
+          suppressLiveUntil = Date.now() + Math.max(displaySeconds * 1000 + 2500, 15000);
+          eventQueue = [];
+          recentSoundKeys.clear();
+          stopAllAudioClips();
+          if (activeEntry) {
+            dismissAlert(activeEntry);
+          }
+        } else if (Date.now() < suppressLiveUntil) {
+          return;
         }
 
         if (!isTestSource && !streamPrimed && isLikelyBackfillBatch(data.message.alerts, batchSentAt)) {
