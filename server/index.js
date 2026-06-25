@@ -1213,11 +1213,11 @@ function classifyAlert(alert) {
     );
 
   if (isObservedTornadoWarning) {
-    return { key: 'tornado-observed', label: 'OBSERVED - TORNADO WARNING', rank: 80, color: '#a40000', fill: '#a40000' };
+    return { key: 'tornado-observed', label: 'CONFIRMED TORNADO WARNING', rank: 80, color: '#a40000', fill: '#a40000' };
   }
 
   if (name.includes('RADAR INDICATED TORNADO WARNING') || event === 'TORNADO WARNING') {
-    return { key: 'radar-indicated-tornado-warning', label: 'TORNADO WARNING', rank: 70, color: '#d10000', fill: '#d10000' };
+    return { key: 'radar-indicated-tornado-warning', label: 'RADAR INDICATED TORNADO WARNING', rank: 70, color: '#d10000', fill: '#d10000' };
   }
 
   if (name.includes('TORNADO WATCH') || event === 'TORNADO WATCH') {
