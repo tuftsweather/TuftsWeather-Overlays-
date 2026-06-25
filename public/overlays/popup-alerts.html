@@ -389,9 +389,11 @@
     let allowQueue = false;
     let isQueuing = false;
     let activeEntry = null;
+    let activeDismissTimer = null;
     let eventQueue = [];
     let soundChain = Promise.resolve();
-    const activeAudioClips = new Set();
+    let soundToken = 0;
+    const activeAudioClips = new Map();
     let suppressLiveUntil = 0;
     const recentSoundKeys = new Map();
     let streamPrimed = false;
@@ -998,13 +1000,15 @@
       return "";
     }
 
-    function playAudioClip(url, volume = 1) {
+    function playAudioClip(url, volume = 1, token = soundToken) {
       if (!url) {
+        return Promise.resolve();
+      }
+      if (token !== soundToken) {
         return Promise.resolve();
       }
 
       const audio = new Audio(url);
-      activeAudioClips.add(audio);
       audio.preload = "auto";
       audio.volume = volume;
 
@@ -1020,8 +1024,14 @@
           resolve();
         };
 
+        activeAudioClips.set(audio, handleDone);
         audio.addEventListener("ended", handleDone, { once: true });
         audio.addEventListener("error", handleDone, { once: true });
+
+        if (token !== soundToken) {
+          handleDone();
+          return;
+        }
 
         audio.play().catch(() => {
           cleanup();
@@ -1031,14 +1041,31 @@
     }
 
     function stopAllAudioClips() {
-      for (const audio of activeAudioClips) {
+      soundToken += 1;
+      for (const [audio, finish] of activeAudioClips) {
         try {
           audio.pause();
           audio.currentTime = 0;
         } catch {}
+        finish();
       }
       activeAudioClips.clear();
       soundChain = Promise.resolve();
+    }
+
+    function resetPopupState({ clearRecent = false } = {}) {
+      if (activeDismissTimer) {
+        window.clearTimeout(activeDismissTimer);
+        activeDismissTimer = null;
+      }
+      stopAllAudioClips();
+      eventQueue = [];
+      activeEntry = null;
+      isQueuing = false;
+      stack.replaceChildren();
+      if (clearRecent) {
+        recentSoundKeys.clear();
+      }
     }
 
     function playAlertSound(alert, classification) {
@@ -1064,9 +1091,10 @@
         }
       }
 
-      soundChain = soundChain
-        .then(() => playAudioClip(SOUND_LIBRARY.beep, beepVolume))
-        .then(() => playAudioClip(alertSoundUrl, alertVolume))
+      const token = ++soundToken;
+      soundChain = Promise.resolve()
+        .then(() => playAudioClip(SOUND_LIBRARY.beep, beepVolume, token))
+        .then(() => playAudioClip(alertSoundUrl, alertVolume, token))
         .catch(() => {});
     }
 
@@ -1077,6 +1105,10 @@
 
       entry.closing = true;
       entry.element.classList.add("exiting");
+      if (activeDismissTimer) {
+        window.clearTimeout(activeDismissTimer);
+        activeDismissTimer = null;
+      }
       window.setTimeout(() => {
         if (activeEntry === entry) {
           activeEntry = null;
@@ -1150,7 +1182,7 @@
       fitTextToBox(item.querySelector(".alert-counties"), 12, 18);
       fitTextToBox(item.querySelector(".alert-threat"), 11, 15);
       playAlertSound(alert, classification);
-      window.setTimeout(() => dismissAlert(activeEntry), displaySeconds * 1000);
+      activeDismissTimer = window.setTimeout(() => dismissAlert(activeEntry), displaySeconds * 1000);
     }
 
     function enqueueAlerts(alerts, batchSentAt = 0) {
@@ -1296,12 +1328,15 @@
         if (isTestSource) {
           allowQueue = true;
           suppressLiveUntil = Date.now() + Math.max(displaySeconds * 1000 + 2500, 15000);
-          eventQueue = [];
-          recentSoundKeys.clear();
-          stopAllAudioClips();
-          if (activeEntry) {
-            dismissAlert(activeEntry);
+          resetPopupState({ clearRecent: true });
+          streamPrimed = true;
+          const testAlert = data.message.alerts.find((alert) => classifyAlert(alert));
+          if (testAlert) {
+            isQueuing = true;
+            renderAlert(testAlert);
           }
+          statusEl.textContent = "Test alert - showing preview";
+          return;
         } else if (Date.now() < suppressLiveUntil) {
           return;
         }
