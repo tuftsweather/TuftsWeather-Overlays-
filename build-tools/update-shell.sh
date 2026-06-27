@@ -26,10 +26,11 @@ fi
 
 git pull --ff-only
 npm install
+npm run build
 
 if [ ! -f "config/localoverlays.local.json" ]; then
   cp "config/localoverlays.json" "config/localoverlays.local.json"
 fi
 
-echo "Update complete. Your local config was kept."
+echo "Update complete. Your local config was kept and the dashboard was rebuilt."
 read -r -p "Press [Enter] key to exit..."

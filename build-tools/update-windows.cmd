@@ -37,9 +37,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+call npm run build
+if errorlevel 1 (
+  echo npm run build failed.
+  pause
+  exit /b 1
+)
+
 if not exist "config\localoverlays.local.json" (
   copy /y "config\localoverlays.json" "config\localoverlays.local.json" >nul
 )
 
-echo Update complete. Your local config was kept.
+echo Update complete. Your local config was kept and the dashboard was rebuilt.
 pause

@@ -146,7 +146,7 @@ If you installed this from GitHub with Git, run one of these to update to the la
 - Windows: `build-tools/update-windows.cmd`
 - Git Bash / shell: `build-tools/update-shell.sh`
 
-The updater runs `git pull --ff-only` and `npm install`. It keeps your private `config/localoverlays.local.json` file and makes a quick backup in `config/backups/` before pulling.
+The updater runs `git pull --ff-only`, `npm install`, and `npm run build`. It keeps your private `config/localoverlays.local.json` file and makes a quick backup in `config/backups/` before pulling.
 
 ## Build Dashboard
 
