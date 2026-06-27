@@ -24,6 +24,7 @@ Do not commit:
 - `node_modules/`
 - `dist/`
 - `storage/parser/shapefiles.db`
+- custom files inside `user-overlays/`
 - `*.log`
 
 The `.gitignore` already blocks those files.
@@ -109,6 +110,34 @@ Each custom camera only needs a name and URL. Location is optional. Custom chase
 You can also paste a normal YouTube watch URL like `https://www.youtube.com/watch?v=VIDEO_ID`; the server will convert it to an embed URL automatically.
 
 Restart TuftsWeather Overlays after changing the config.
+
+## Add Custom Overlay Files
+
+Put personal overlay files in:
+
+```text
+user-overlays/
+```
+
+Files in that folder are served at:
+
+```text
+http://127.0.0.1:4318/user-overlays/your-file.html
+```
+
+Example:
+
+```text
+user-overlays/my-overlay.html
+```
+
+opens at:
+
+```text
+http://127.0.0.1:4318/user-overlays/my-overlay.html
+```
+
+Normal updates do not touch custom files in `user-overlays/`. A full reinstall that deletes the whole project folder will delete them, so back up `user-overlays/` before reinstalling.
 
 ## Change Feed Settings
 

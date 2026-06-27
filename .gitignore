@@ -15,6 +15,8 @@ config/localoverlays.local.json
 config/backups/
 storage/parser/
 !storage/parser/.gitkeep
+user-overlays/*
+!user-overlays/README.md
 
 # Editor directories and files
 .vscode/*

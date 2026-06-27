@@ -13,6 +13,7 @@ const publicDir = path.join(rootDir, 'public');
 const widgetsDir = path.join(publicDir, 'widgets');
 const staticDir = path.join(publicDir, 'assets', 'static');
 const distDir = path.join(rootDir, 'dist');
+const userOverlaysDir = path.join(rootDir, 'user-overlays');
 const configPath = path.join(rootDir, 'config', 'localoverlays.local.json');
 const defaultConfigPath = path.join(rootDir, 'config', 'localoverlays.json');
 const parserStorageDir = path.join(rootDir, 'storage', 'parser');
@@ -182,6 +183,7 @@ function sanitizeServiceConfig(input) {
 }
 
 fs.mkdirSync(parserStorageDir, { recursive: true });
+fs.mkdirSync(userOverlaysDir, { recursive: true });
 
 const state = {
   startedAt: new Date().toISOString(),
@@ -2776,6 +2778,11 @@ app.get(['/widgets/warnedcams-winter', '/widgets/warnedcams-winter/', '/widgets/
   response.setHeader('Cache-Control', 'no-store');
   response.sendFile(path.join(widgetsDir, 'warnedcams-winter.html'));
 });
+
+app.use('/user-overlays', express.static(userOverlaysDir, {
+  index: ['index.html'],
+  fallthrough: true,
+}));
 
 app.use(express.static(publicDir));
 
